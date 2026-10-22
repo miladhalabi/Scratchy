@@ -1,0 +1,157 @@
+package com.scratchy.app
+
+import android.content.Context
+import android.os.Handler
+import android.os.Looper
+import android.util.Base64
+import org.json.JSONArray
+import org.json.JSONObject
+import java.io.File
+import java.net.HttpURLConnection
+import java.net.URL
+import java.util.concurrent.Executors
+
+/** AI settings, kept in the app's private storage. The key is typed in by the user; it is never in the code. */
+object AiSettings {
+    const val DEFAULT_MODEL = "deepseek/deepseek-v4.1-flash-1017"
+    private fun p(ctx: Context) = ctx.getSharedPreferences("ai", Context.MODE_PRIVATE)
+    fun apiKey(ctx: Context) = p(ctx).getString("key", "").orEmpty().trim()
+    fun textModel(ctx: Context) = p(ctx).getString("textModel", DEFAULT_MODEL).orEmpty().ifBlank { DEFAULT_MODEL }
+    fun imageModel(ctx: Context) = p(ctx).getString("imageModel", "").orEmpty().ifBlank { textModel(ctx) }
+    fun set(ctx: Context, name: String, value: String) = p(ctx).edit().putString(name, value.trim()).apply()
+    fun raw(ctx: Context, name: String) = p(ctx).getString(name, "").orEmpty()
+}
+
+/** Title suggestions through OpenRouter's chat API. Called only when the user taps the sparkle button. */
+object Ai {
+    private const val URL_CHAT = "https://openrouter.ai/api/v1/chat/completions"
+    private val io = Executors.newSingleThreadExecutor()
+    private val main = Handler(Looper.getMainLooper())
+
+    fun configured(ctx: Context) = AiSettings.apiKey(ctx).isNotEmpty()
+
+    /** [done] runs on the main thread with (titles, null) or (null, error message). */
+    fun suggestTitles(ctx: Context, body: String, image: File?, done: (List<String>?, String?) -> Unit) {
+        val app = ctx.applicationContext
+        io.execute {
+            val result = runCatching { requestTitles(app, body, image) }
+            main.post {
+                result.fold(
+                    { done(it, null) },
+                    { done(null, it.message ?: "Something went wrong") }
+                )
+            }
+        }
+    }
+
+    /** Sends a tiny message to check the key and model. */
+    fun ping(ctx: Context, done: (String) -> Unit) {
+        val app = ctx.applicationContext
+        io.execute {
+            val msg = runCatching {
+                val reply = chat(app, AiSettings.textModel(app), JSONArray().put(
+                    JSONObject().put("role", "user").put("content", "Reply with the single word: ok")), 20)
+                "Works. Model said: ${reply.trim().take(40)}"
+            }.getOrElse { it.message ?: "Failed" }
+            main.post { done(msg) }
+        }
+    }
+
+    private fun requestTitles(ctx: Context, body: String, image: File?): List<String> {
+        val prompt = "You name notes. Give 3 title options for this note, from shortest to most detailed: " +
+            "(1) 3 to 5 words, (2) 6 to 9 words, (3) 10 to 16 words that capture the main subject plus the key " +
+            "specifics in the note (who, what, numbers, dates, places, decisions). Be concrete, never generic: " +
+            "\"Meeting notes\" is too vague. No quotes and no trailing punctuation. Write in the same language " +
+            "as the note text; for example Arabic text gets Arabic titles. If an image is attached, use what " +
+            "it shows, including any visible text, the subject and the setting. " +
+            "Reply with only a JSON array of 3 strings."
+        val text = if (body.isBlank()) prompt else "$prompt\n\nNote text:\n${body.take(4000)}"
+        val content: Any = if (image != null && image.exists()) {
+            val mime = if (image.name.endsWith(".png")) "image/png" else "image/jpeg"
+            val b64 = Base64.encodeToString(image.readBytes(), Base64.NO_WRAP)
+            JSONArray()
+                .put(JSONObject().put("type", "text").put("text", text))
+                .put(JSONObject().put("type", "image_url")
+                    .put("image_url", JSONObject().put("url", "data:$mime;base64,$b64")))
+        } else text
+        val model = if (image != null) AiSettings.imageModel(ctx) else AiSettings.textModel(ctx)
+        val messages = JSONArray().put(JSONObject().put("role", "user").put("content", content))
+        val reply = chat(ctx, model, messages, 1500)
+        val titles = parseTitles(reply)
+        if (titles.isEmpty()) error("No suggestions came back")
+        return titles.take(3)
+    }
+
+    private fun chat(ctx: Context, model: String, messages: JSONArray, maxTokens: Int): String {
+        val key = AiSettings.apiKey(ctx)
+        if (key.isEmpty()) error("Add your OpenRouter key in Settings")
+        val payload = JSONObject().put("model", model).put("messages", messages)
+            .put("max_tokens", maxTokens).put("temperature", 0.7)
+            // Thinking models (Qwen3, DeepSeek R1...) can spend the whole budget reasoning and return no
+            // answer. Titles don't need that, so ask for no reasoning; models without it ignore this.
+            .put("reasoning", JSONObject().put("enabled", false))
+        val conn = (URL(URL_CHAT).openConnection() as HttpURLConnection).apply {
+            requestMethod = "POST"
+            connectTimeout = 15000; readTimeout = 30000
+            doOutput = true
+            setRequestProperty("Authorization", "Bearer $key")
+            setRequestProperty("Content-Type", "application/json")
+            setRequestProperty("X-Title", "Scratchy")
+        }
+        try {
+            conn.outputStream.use { it.write(payload.toString().toByteArray()) }
+            val code = conn.responseCode
+            val text = (if (code in 200..299) conn.inputStream else conn.errorStream)
+                ?.bufferedReader()?.use { it.readText() }.orEmpty()
+            if (code !in 200..299) {
+                val msg = runCatching { JSONObject(text).getJSONObject("error").getString("message") }.getOrNull()
+                error(
+                    when {
+                        code == 401 -> "The key was rejected. Check it in Settings."
+                        code == 402 -> "Out of credits on OpenRouter."
+                        code == 429 -> "Too many requests. Try again in a moment."
+                        msg != null -> msg.take(140)
+                        else -> "HTTP $code"
+                    }
+                )
+            }
+            val choice = JSONObject(text).getJSONArray("choices").getJSONObject(0)
+            val content = contentText(choice.optJSONObject("message"))
+            if (content.isBlank()) {
+                error(
+                    if (choice.optString("finish_reason") == "length")
+                        "The model ran out of tokens while thinking. Pick a non-thinking model in Settings."
+                    else "The model sent an empty reply. Try another model in Settings."
+                )
+            }
+            return content
+        } finally {
+            conn.disconnect()
+        }
+    }
+
+    /** The reply text. JSON null (thinking models) and content made of parts are both handled. */
+    private fun contentText(message: JSONObject?): String {
+        val c = message?.opt("content") ?: return ""
+        return when (c) {
+            JSONObject.NULL -> ""
+            is String -> c
+            is JSONArray -> (0 until c.length()).joinToString("") { c.optJSONObject(it)?.optString("text").orEmpty() }
+            else -> ""
+        }
+    }
+
+    /** Accepts a JSON array, or falls back to one title per line. */
+    private fun parseTitles(reply: String): List<String> {
+        val start = reply.indexOf('[')
+        val end = reply.lastIndexOf(']')
+        val fromJson = if (start in 0 until end) runCatching {
+            val a = JSONArray(reply.substring(start, end + 1))
+            (0 until a.length()).map { a.getString(it) }
+        }.getOrNull() else null
+        val raw = fromJson ?: reply.lines()
+        return raw.map { it.trim().trimStart('-', '*', '•', ' ').trim('"', '\'', ' ', '.', ',') }
+            .filter { it.isNotEmpty() && it.length <= 140 && !it.equals("null", ignoreCase = true) }
+            .distinct()
+    }
+}

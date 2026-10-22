@@ -1,0 +1,44 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+
+    <!-- note card, slightly tilted -->
+    <group android:pivotX="54" android:pivotY="54" android:rotation="-7">
+        <!-- shadow -->
+        <path android:fillColor="#33000000"
+            android:pathData="M37,29.5H69a6,6 0 0 1 6,6V77.5a6,6 0 0 1 -6,6H37a6,6 0 0 1 -6,-6V35.5a6,6 0 0 1 6,-6z" />
+        <!-- paper -->
+        <path android:fillColor="#FFFFFFFF"
+            android:pathData="M37,26H69a6,6 0 0 1 6,6V74a6,6 0 0 1 -6,6H37a6,6 0 0 1 -6,-6V32a6,6 0 0 1 6,-6z" />
+        <!-- title line, then body lines -->
+        <path android:strokeColor="#FFFF7A18" android:strokeWidth="3.6" android:strokeLineCap="round"
+            android:pathData="M38,37H55" />
+        <path android:strokeColor="#FFFFD0A6" android:strokeWidth="3" android:strokeLineCap="round"
+            android:pathData="M38,46H68M38,54H61M38,62H50" />
+    </group>
+
+    <!-- scratch stroke -->
+    <path android:strokeColor="#FFFFFFFF" android:strokeWidth="2.6" android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M30,88C37,83 43,91 50,86S58,83 63,85" />
+
+    <!-- pencil, tip pointing down-left -->
+    <group android:translateX="75" android:translateY="72">
+        <group android:rotation="45">
+            <path android:fillColor="#33000000"
+                android:pathData="M-4,-14H4V10L0,19.5L-4,10z" />
+            <!-- eraser -->
+            <path android:fillColor="#FFFF6B8A"
+                android:pathData="M-4,-18a4,4 0 0 1 8,0V-13H-4z" />
+            <!-- ferrule -->
+            <path android:fillColor="#FFC9CCD6" android:pathData="M-4,-13H4V-9H-4z" />
+            <!-- body -->
+            <path android:fillColor="#FF2B2D42" android:pathData="M-4,-9H4V9H-4z" />
+            <path android:fillColor="#FF3D405B" android:pathData="M0,-9H4V9H0z" />
+            <!-- sharpened wood -->
+            <path android:fillColor="#FFFFD9A8" android:pathData="M-4,9H4L0,18z" />
+            <!-- lead -->
+            <path android:fillColor="#FF2B2D42" android:pathData="M-1.5,14.7H1.5L0,18z" />
+        </group>
+    </group>
+</vector>
