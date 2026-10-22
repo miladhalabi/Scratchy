@@ -58,7 +58,7 @@ class OverlayService : Service() {
     private lateinit var wm: WindowManager
     private lateinit var ui: Context
     private lateinit var pal: Palette
-    private lateinit var bar: View                    // the visible sliver
+    private lateinit var bar: BarView                 // the visible glass pill
     private lateinit var zone: FrameLayout            // the (wider) touch target window
     private lateinit var zoneParams: WindowManager.LayoutParams
     private var panel: PanelLayout? = null
@@ -71,13 +71,22 @@ class OverlayService : Service() {
     private val main = Handler(Looper.getMainLooper())
     private val tuckRunnable = Runnable { tuck() }
 
-    private lateinit var barBg: GradientDrawable
     private var pendingShot: Uri? = null              // a fresh screenshot waiting to be attached
     private var lastShotId = -1L
     private val clearPending = Runnable { clearPendingShot() }
+    private var chooserOpen = false                   // the card is asking where a screenshot goes
+    /** A waiting screenshot is forgotten after this long (Settings, default 60 s). */
+    private fun forgetAfterMs() = overlayPrefs.getInt("shot_ttl", 60).coerceIn(5, 3600) * 1000L
+    private val expirePending = object : Runnable {
+        override fun run() {
+            // Never pull the question away while you are looking at it; try again shortly.
+            if (chooserOpen) main.postDelayed(this, 10_000) else clearPendingShot()
+        }
+    }
     private lateinit var overlayPrefs: android.content.SharedPreferences
     private val sideListener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
         if (key == "right" && !panelOpen) applySideFromPrefs()
+        if (key == "bar_gap" && ::bar.isInitialized) bar.gapPx = barGapPx()
     }
     private val shotObserver = object : ContentObserver(Handler(Looper.getMainLooper())) {
         override fun onChange(selfChange: Boolean) {
@@ -86,8 +95,8 @@ class OverlayService : Service() {
         }
     }
 
-    private val zoneW get() = dp(30)
-    private val zoneH get() = dp(80)
+    private val zoneW get() = dp(40)
+    private val zoneH get() = dp(88)
     private val screenW get() = resources.displayMetrics.widthPixels
     private val screenH get() = resources.displayMetrics.heightPixels
     private val reduced get() = Motion.reduced(this)
@@ -121,6 +130,9 @@ class OverlayService : Service() {
         genieViews.forEach { runCatching { wm.removeView(it) } }
         contentResolver.unregisterContentObserver(shotObserver)
         main.removeCallbacks(tuckRunnable)
+        main.removeCallbacks(breathRunnable)
+        main.removeCallbacks(pendingPulse)
+        main.removeCallbacks(expirePending)
         main.removeCallbacks(clearPending)
         editor?.commit()
         panel?.let { runCatching { wm.removeView(it) } }
@@ -177,25 +189,23 @@ class OverlayService : Service() {
     private fun restX(right: Boolean) = if (right) screenW - zoneW else 0
 
     private fun placeBar() {
-        val lp = bar.layoutParams as FrameLayout.LayoutParams
-        lp.gravity = (if (onRight) Gravity.RIGHT else Gravity.LEFT) or Gravity.CENTER_VERTICAL
-        bar.layoutParams = lp
-        bar.pivotX = if (onRight) dp(6).toFloat() else 0f
-        bar.pivotY = dp(28).toFloat()
+        bar.onRight = onRight
     }
+
+    /** How far in from the screen edge the bar sits (Settings, default 8dp), so a screen protector doesn't cover it. */
+    private fun barGapPx() = dp(overlayPrefs.getInt("bar_gap", 8).coerceIn(0, 24)).toFloat()
 
     private fun createBar() {
         val prefs = getSharedPreferences("overlay", MODE_PRIVATE)
         overlayPrefs = prefs
         prefs.registerOnSharedPreferenceChangeListener(sideListener)
         onRight = prefs.getBoolean("right", false)
-        barBg = roundRect(pal.accent, dp(3).toFloat())
-        bar = View(ui).apply {
-            background = barBg
-            alpha = 0.9f
+        bar = BarView(ui).apply {
+            gapPx = barGapPx()
+            setTint(pal.accent, animate = false)
             contentDescription = "Scratchy: open notes"
         }
-        zone = FrameLayout(ui).apply { addView(bar, FrameLayout.LayoutParams(dp(6), dp(56))) }
+        zone = FrameLayout(ui).apply { addView(bar, FrameLayout.LayoutParams(-1, -1)) }
         placeBar()
         zoneParams = WindowManager.LayoutParams(
             zoneW, zoneH,
@@ -219,7 +229,7 @@ class OverlayService : Service() {
             if (mode == 0) {
                 mode = 2
                 zone.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
-                Motion.spring(bar, DynamicAnimation.SCALE_Y, 1.15f, 0.8f, 0.3f)
+                bar.longPressed()
             }
         }
 
@@ -232,9 +242,8 @@ class OverlayService : Service() {
                     startX = zoneParams.x; startY = zoneParams.y
                     mode = 0
                     tracker = VelocityTracker.obtain().also { it.addMovement(e) }
-                    // Respond on touch-down: the sliver widens and brightens immediately.
-                    Motion.spring(bar, DynamicAnimation.ALPHA, 1f, 1f, 0.15f)
-                    Motion.spring(bar, DynamicAnimation.SCALE_X, 2f, 1f, 0.15f)
+                    // Respond on touch-down: the pill thickens and brightens immediately.
+                    bar.pressDown()
                     main.postDelayed(longPress, 380)
                 }
                 MotionEvent.ACTION_MOVE -> {
@@ -260,8 +269,7 @@ class OverlayService : Service() {
                 }
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                     main.removeCallbacks(longPress)
-                    Motion.spring(bar, DynamicAnimation.SCALE_X, 1f, 0.7f, 0.3f)
-                    Motion.spring(bar, DynamicAnimation.SCALE_Y, 1f, 0.7f, 0.3f)
+                    bar.pressUp()
                     tracker?.addMovement(e)
                     tracker?.computeCurrentVelocity(1000)
                     val vx = tracker?.xVelocity ?: 0f
@@ -281,6 +289,7 @@ class OverlayService : Service() {
         }
         wm.addView(zone, zoneParams)
         scheduleTuck(2000)
+        main.postDelayed(breathRunnable, 6_000)
     }
 
     /** The side can be changed from Settings; the bar then glides across and the card follows it. */
@@ -296,7 +305,7 @@ class OverlayService : Service() {
             spring = SpringForce(restX(onRight).toFloat()).setDampingRatio(0.85f).setStiffness(Motion.stiffness(0.5f))
             minimumVisibleChange = 1f; start()
         }
-        Motion.spring(bar, DynamicAnimation.ALPHA, 1f, 1f, 0.2f)
+        bar.wake()
         scheduleTuck(1500)
     }
 
@@ -323,6 +332,7 @@ class OverlayService : Service() {
             }
         }
         prefs.edit().putBoolean("right", onRight).putInt("y", targetY.toInt()).apply()
+        if (switchSide && !reduced) main.postDelayed({ bar.landing() }, 240)   // squash as it lands on the edge
         scheduleTuck()
     }
 
@@ -334,8 +344,29 @@ class OverlayService : Service() {
     /** When idle, the sliver thins and fades so it stays out of the way. */
     private fun tuck() {
         if (panelOpen) return
-        Motion.spring(bar, DynamicAnimation.ALPHA, if (pendingShot != null) 0.9f else 0.45f, 1f, 0.5f)
+        if (pendingShot != null) bar.tuckAway(partial = true) else bar.tuckAway()
     }
+
+    // ---- idle breathing: one slow breath now and then, never a constant animation ----
+
+    private val breathRunnable = object : Runnable {
+        override fun run() {
+            val interactive = (getSystemService(POWER_SERVICE) as android.os.PowerManager).isInteractive
+            if (!panelOpen && interactive) bar.breatheOnce(strong = false)
+            main.postDelayed(this, 11_000)
+        }
+    }
+
+    // ---- while a screenshot is waiting the bar pulses green and sends out a ring now and then ----
+
+    private val pendingPulse = object : Runnable {
+        override fun run() {
+            if (pendingShot == null) return
+            bar.dotsOnce()
+            main.postDelayed(this, 2600)
+        }
+    }
+    private var pulseCount = 0
 
     // ---- screenshots: take one the normal way, the bar turns green, the note opens with it attached ----
 
@@ -350,13 +381,14 @@ class OverlayService : Service() {
         if (mode == "auto" && panelOpen && open != null) { open.addImage(shot.uri); return }
         pendingShot = shot.uri
         if (panelOpen) showShotPrompt?.invoke()          // "ask": offer it on the open card
-        barBg.setColor(GREEN)
+        bar.setTint(GREEN)
         main.removeCallbacks(tuckRunnable)
-        Motion.spring(bar, DynamicAnimation.ALPHA, 1f, 1f, 0.2f)
-        Motion.spring(bar, DynamicAnimation.SCALE_X, 2.6f, 0.6f, 0.3f)
-        main.postDelayed({ Motion.spring(bar, DynamicAnimation.SCALE_X, 1f, 1f, 0.4f) }, 900)
-        main.removeCallbacks(clearPending)
-        main.postDelayed(clearPending, 90_000)
+        bar.wake()
+        pulseCount = 0
+        main.removeCallbacks(pendingPulse)
+        main.post(pendingPulse)
+        main.removeCallbacks(expirePending)
+        main.postDelayed(expirePending, forgetAfterMs())
         scheduleTuck(3000)
     }
 
@@ -366,9 +398,11 @@ class OverlayService : Service() {
     private var hideChooserRef: (() -> Unit)? = null
 
     private fun clearPendingShot() {
+        main.removeCallbacks(expirePending)
         hideChooserRef?.invoke()
         pendingShot = null
-        barBg.setColor(pal.accent)
+        main.removeCallbacks(pendingPulse)
+        bar.setTint(pal.accent)
         scheduleTuck(500)
     }
 
@@ -392,6 +426,7 @@ class OverlayService : Service() {
         if (!::zone.isInitialized || !zone.isAttachedToWindow) return
         runCatching { wm.removeView(zone) }
         runCatching { wm.addView(zone, zoneParams) }
+        bar.pressUp()       // the touch that opened the card never gets its "finger up"; release the pill ourselves
     }
 
     private fun expand() {
@@ -549,6 +584,7 @@ class OverlayService : Service() {
                 pressable(0.97f) { onTap() }
             }
         hideChooser = {
+            chooserOpen = false
             chooser.visibility = View.GONE
             if (recents.visibility != View.VISIBLE) ed.visibility = View.VISIBLE
         }
@@ -609,6 +645,7 @@ class OverlayService : Service() {
                 pressable(0.95f) { main.removeCallbacks(clearPending); clearPending.run() }
             }, LinearLayout.LayoutParams(-1, -2))
             chooser.visibility = View.VISIBLE
+            chooserOpen = true
         }
         showShotPrompt = { if (shotMode() == "ask") showChooser() }
         if (pendingShot != null && shotMode() == "ask") showChooser()
@@ -714,7 +751,7 @@ class OverlayService : Service() {
         // The bar stays visible while the card is open, and tapping it closes the card. Windows stack in
         // the order they were added, so put the bar back on top of the card and the catcher.
         main.removeCallbacks(tuckRunnable)
-        bar.alpha = 1f
+        bar.wake()
         main.post { raiseBar() }
 
         fun savePanel() = saved.edit()
@@ -755,7 +792,7 @@ class OverlayService : Service() {
             whenSized(p) {
                 val bmp = capture(p)
                 val loc = IntArray(2); p.getLocationOnScreen(loc)
-                if (blurPx > 0) animateBlur(p, lp, 0, blurPx, 420)
+                if (blurPx > 0) animateBlur(p, lp, 0, blurPx, genieMs(420))
                 runGenie(bmp, loc[0], loc[1], opening = true, live = p,
                     cardAlpha = Appearance.opacity(this) / 100f) {
                 }
@@ -850,7 +887,8 @@ class OverlayService : Service() {
             .hideSoftInputFromWindow(p.windowToken, 0)
         // Bring the bar back right away, not after the animation ends.
         zone.visibility = View.VISIBLE
-        Motion.spring(bar, DynamicAnimation.ALPHA, 1f, 1f, 0.15f)
+        bar.wake()
+        bar.swell()          // react at the click, not half a second later when the card has finished closing
 
         fun removePanel() {
             // Make the whole window transparent and untouchable first, then remove it a beat
@@ -877,18 +915,15 @@ class OverlayService : Service() {
                 val loc = IntArray(2); p.getLocationOnScreen(loc)
                 runGenie(bmp, loc[0], loc[1], opening = false, live = p,
                     cardAlpha = Appearance.opacity(this) / 100f) {
-                    // The bar swells for a moment as it swallows the card.
-                    Motion.spring(bar, DynamicAnimation.SCALE_X, 2.4f, 0.6f, 0.2f)
-                    main.postDelayed({ Motion.spring(bar, DynamicAnimation.SCALE_X, 1f, 1f, 0.35f) }, 140)
                     done()
                 }
                 val wlp = p.layoutParams as WindowManager.LayoutParams
                 val blurNow = if (Build.VERSION.SDK_INT >= 31) wlp.blurBehindRadius else 0
                 if (blurNow > 0) {
                     // The card fades via the crossfade; keep the window so its blur can fade out with the genie.
-                    animateBlur(p, wlp, blurNow, 0, 480) { removePanel() }
+                    animateBlur(p, wlp, blurNow, 0, genieMs(480)) { removePanel() }
                 } else {
-                    main.postDelayed({ removePanel() }, 300)   // after the crossfade has handed over
+                    main.postDelayed({ removePanel() }, genieMs(300))   // after the crossfade has handed over
                 }
             }
             else -> {
@@ -932,6 +967,10 @@ class OverlayService : Service() {
 
     private val genieViews = mutableListOf<View>()
 
+    /** Genie speed from Settings, 50%..200% (100% = the default feel). Every genie timing is divided by it. */
+    private fun genieMs(base: Long): Long =
+        (base * 100f / overlayPrefs.getInt("genie_speed", 100).coerceIn(50, 200)).toLong()
+
     /** Eases the window's blur radius so it never pops on or off. */
     private fun animateBlur(view: View, lp: WindowManager.LayoutParams, from: Int, to: Int, ms: Long, onEnd: (() -> Unit)? = null) {
         if (Build.VERSION.SDK_INT < 31) { onEnd?.invoke(); return }
@@ -974,10 +1013,11 @@ class OverlayService : Service() {
         cardAlpha: Float,                  // the card's fill opacity (0..1)
         onEnd: () -> Unit,
     ) {
-        val bl = IntArray(2); bar.getLocationOnScreen(bl)
+        val bl = IntArray(2); zone.getLocationOnScreen(bl)
         val gv = GenieView(
             ui, bmp, ox.toFloat(), oy.toFloat(),
-            bl[0] + bar.width / 2f, bl[1] + bar.height / 2f, onRight,
+            if (onRight) bl[0] + zone.width - bar.sliverCenterPx else bl[0] + bar.sliverCenterPx,
+            bl[1] + zone.height / 2f, onRight,
             initialT = if (opening) 1f else 0f
         )
         val glp = WindowManager.LayoutParams(
@@ -1020,10 +1060,10 @@ class OverlayService : Service() {
 
         if (!opening) {
             gv.fade = 0f
-            crossfade(false, 260) {}           // live card out, snapshot in, as the genie starts
+            crossfade(false, genieMs(260)) {}   // live card out, snapshot in, as the genie starts
         }
         ValueAnimator.ofFloat(0f, 1f).apply {
-            duration = if (opening) 420 else 480
+            duration = genieMs(if (opening) 420 else 480)
             interpolator = if (opening) DecelerateInterpolator(1.3f) else AccelerateDecelerateInterpolator()
             addUpdateListener {
                 val a = it.animatedValue as Float
@@ -1032,7 +1072,7 @@ class OverlayService : Service() {
             addListener(object : AnimatorListenerAdapter() {
                 override fun onAnimationEnd(animation: Animator) {
                     onEnd()
-                    if (opening) crossfade(true, 260) { live.alpha = 1f; main.postDelayed({ removeSnapshot() }, 16) }
+                    if (opening) crossfade(true, genieMs(260)) { live.alpha = 1f; main.postDelayed({ removeSnapshot() }, 16) }
                     else main.postDelayed({ removeSnapshot() }, 16)
                 }
             })
