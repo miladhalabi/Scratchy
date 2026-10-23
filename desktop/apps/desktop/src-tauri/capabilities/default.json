@@ -1,6 +1,6 @@
 {
   "identifier": "default",
-  "windows": ["main", "bar", "card"],
+  "windows": ["main", "bar", "card", "catcher"],
   "permissions": [
     "core:default",
     "core:event:default",

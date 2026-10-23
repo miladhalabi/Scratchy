@@ -2,7 +2,7 @@
   import { onDestroy, onMount } from "svelte";
   import { local, notes } from "./state";
   import { vaultOpen, vaultSetUp } from "./vault";
-  import type { Note } from "@scratchy/core";
+  import { type Note, continueChecklist, flipBox, toggleChecklist as toggleLine } from "@scratchy/core";
 
   let { note, onBack, onDelete }: { note: Note; onBack: () => void; onDelete: (n: Note) => void } = $props();
 
@@ -22,8 +22,6 @@
   let timer: ReturnType<typeof setTimeout> | undefined;
   let bodyEl: HTMLTextAreaElement;
   let titleEl: HTMLInputElement;
-
-  const BOX_OFF = "☐", BOX_ON = "☑";
 
   async function commit() {
     clearTimeout(timer);
@@ -60,39 +58,25 @@
     schedule();
   }
 
-  /** Adds or removes the checkbox at the start of the line with the cursor. */
-  function toggleChecklist() {
-    const pos = bodyEl.selectionStart ?? 0;
-    const start = body.lastIndexOf("\n", pos - 1) + 1;
-    const has = body.startsWith(BOX_OFF + " ", start) || body.startsWith(BOX_ON + " ", start);
-    body = has ? body.slice(0, start) + body.slice(start + 2) : body.slice(0, start) + BOX_OFF + " " + body.slice(start);
-    schedule();
-    queueMicrotask(() => { bodyEl.focus(); bodyEl.setSelectionRange(pos + (has ? -2 : 2), pos + (has ? -2 : 2)); });
+  function apply(e: { body: string; cursor: number }) {
+    body = e.body; schedule();
+    queueMicrotask(() => { bodyEl.focus(); bodyEl.setSelectionRange(e.cursor, e.cursor); });
   }
+  const toggleChecklist = () => apply(toggleLine(body, bodyEl.selectionStart ?? 0));
 
   /** Enter on a checklist line starts a new item; Enter on an empty item ends the list. */
   function keydown(e: KeyboardEvent) {
     if (e.key !== "Enter" || e.shiftKey || e.isComposing) return;
-    const pos = bodyEl.selectionStart ?? 0;
-    const start = body.lastIndexOf("\n", pos - 1) + 1;
-    const line = body.slice(start, pos);
-    if (!line.startsWith(BOX_OFF + " ") && !line.startsWith(BOX_ON + " ")) return;
-    e.preventDefault();
-    if (line.length === 2) { body = body.slice(0, start) + body.slice(pos); queueMicrotask(() => bodyEl.setSelectionRange(start, start)); }
-    else { body = body.slice(0, pos) + "\n" + BOX_OFF + " " + body.slice(pos); queueMicrotask(() => bodyEl.setSelectionRange(pos + 3, pos + 3)); }
-    schedule();
+    const next = continueChecklist(body, bodyEl.selectionStart ?? 0);
+    if (next) { e.preventDefault(); apply(next); }
   }
 
   /** Click a ☐ / ☑ to flip it. */
-  function click(e: MouseEvent) {
+  function click() {
     const pos = bodyEl.selectionStart ?? 0;
     if (bodyEl.selectionEnd !== pos) return;
-    const start = body.lastIndexOf("\n", pos - 1) + 1;
-    const c = body[start];
-    if (pos <= start + 1 && (c === BOX_OFF || c === BOX_ON)) {
-      body = body.slice(0, start) + (c === BOX_OFF ? BOX_ON : BOX_OFF) + body.slice(start + 1);
-      schedule();
-    }
+    const flipped = flipBox(body, pos);
+    if (flipped != null) { body = flipped; schedule(); }
   }
 </script>
 

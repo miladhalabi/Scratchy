@@ -12,6 +12,7 @@ const screens = {
   main: () => import("./App.svelte"),
   bar: () => import("./Bar.svelte"),
   card: () => import("./Card.svelte"),
+  catcher: () => import("./Catcher.svelte"),
 } as const;
 
 const load = screens[which as keyof typeof screens] ?? screens.main;

@@ -5,6 +5,9 @@
   import SyncPanel from "./lib/SyncPanel.svelte";
   import VaultGate from "./lib/VaultGate.svelte";
   import { vaultOpen, lock } from "./lib/vault";
+  import { serveEngine } from "./lib/bridge";
+  import { emit } from "@tauri-apps/api/event";
+  import { files } from "./lib/files";
   import NoteGrid from "./lib/NoteGrid.svelte";
   import Editor from "./lib/Editor.svelte";
   import type { Note } from "@scratchy/core";
@@ -19,7 +22,11 @@
   onMount(() => {
     applyTheme();
     matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => applyTheme());
-    init(() => { vaultView = false; gate = false; if (editing?.secret) editing = null; }).then(() => { local.onEdit(noteEdited); void startSync(); });
+    init(() => { vaultView = false; gate = false; if (editing?.secret) editing = null; }).then(() => {
+      local.onEdit(noteEdited);
+      void startSync();
+      startEngine();
+    });
     addEventListener("focus", onFocus);
     const key = (e: KeyboardEvent) => {
       if (e.ctrlKey && e.key.toLowerCase() === "n") { e.preventDefault(); editing = createNote(vaultView); }
@@ -27,6 +34,19 @@
     addEventListener("keydown", key);
     return () => { removeEventListener("keydown", key); removeEventListener("focus", onFocus); };
   });
+
+  /** The card lives in its own window and uses this window's notes through small messages. */
+  function startEngine() {
+    const publicNotes = () => local.all().filter((n) => !n.secret);
+    void serveEngine({
+      list: () => publicNotes(),
+      save: (note: Note) => local.save(note),
+      getPrefs: async () => JSON.parse((await files.readText("card_prefs.json")) ?? '{"mode":"recent"}'),
+      setPrefs: (p: unknown) => files.writeText("card_prefs.json", JSON.stringify(p)),
+    });
+    let t: ReturnType<typeof setTimeout> | undefined;
+    local.onChange(() => { clearTimeout(t); t = setTimeout(() => void emit("notes-changed", publicNotes()), 60); });
+  }
 
   async function remove(n: Note) {
     await local.remove(n.id);

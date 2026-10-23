@@ -6,7 +6,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
-use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
+use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(rename_all = "camelCase", default)]
@@ -95,6 +95,28 @@ mod imp {
     pub fn show(win: &WebviewWindow) {
         if let Ok(g) = win.gtk_window() { g.show_all(); }
     }
+
+    /// Exclusive: the card takes the keyboard the moment it opens (so you can type at once).
+    /// On demand: it only gets keys after you click it (used while pinned, so the app underneath keeps its keys).
+    pub fn keyboard(win: &WebviewWindow, exclusive: bool) {
+        if let Ok(g) = win.gtk_window() {
+            g.set_keyboard_mode(if exclusive { KeyboardMode::Exclusive } else { KeyboardMode::OnDemand });
+        }
+    }
+
+    /// A see-through layer over the whole screen, below the card. A click on it closes the card.
+    pub fn create_catcher(app: &AppHandle) -> WebviewWindow {
+        let win = builder(app, "catcher", "index.html?w=catcher", 100, 100).build().expect("catcher window");
+        let g = win.gtk_window().expect("gtk window");
+        g.init_layer_shell();
+        g.set_layer(Layer::Overlay);
+        g.set_namespace("scratchy-catcher");
+        g.set_exclusive_zone(-1);
+        g.set_keyboard_mode(KeyboardMode::None);
+        for e in [Edge::Top, Edge::Bottom, Edge::Left, Edge::Right] { g.set_anchor(e, true); }
+        g.set_app_paintable(true);
+        win
+    }
 }
 
 #[cfg(not(target_os = "linux"))]
@@ -122,6 +144,12 @@ mod imp {
     }
 
     pub fn show(win: &WebviewWindow) { let _ = win.show(); }
+
+    pub fn keyboard(_win: &WebviewWindow, _exclusive: bool) {}
+
+    pub fn create_catcher(app: &AppHandle) -> WebviewWindow {
+        builder(app, "catcher", "index.html?w=catcher", 100, 100).always_on_top(true).maximized(true).focused(false).build().expect("catcher window")
+    }
 }
 
 /// Creates the bar (visible) and the card (hidden) at startup.
@@ -135,7 +163,10 @@ pub fn setup(app: &AppHandle) {
     let (dx, dy) = default_card_pos(app, &p);
     imp::place(&card, false, p.card_x.unwrap_or(dx), p.card_y.unwrap_or(dy));
     // the card stays hidden until the bar is clicked
+    let _catcher = imp::create_catcher(app);
 }
+
+fn catcher(app: &AppHandle) -> Option<WebviewWindow> { app.get_webview_window("catcher") }
 
 fn on_main(app: &AppHandle, f: impl FnOnce(&AppHandle) + Send + 'static) {
     let a = app.clone();
@@ -151,14 +182,23 @@ pub fn show_card(app: &AppHandle) {
             let (dx, dy) = default_card_pos(app, &p);
             imp::place(&c, false, p.card_x.unwrap_or(dx), p.card_y.unwrap_or(dy));
             imp::resize(&c, p.card_w, p.card_h);
+            // Unpinned: a see-through layer below the card catches the "click elsewhere" that closes it.
+            if !p.pinned { if let Some(k) = catcher(app) { imp::show(&k); } }
+            imp::keyboard(&c, !p.pinned);
             imp::show(&c);
-            let _ = c.set_focus();
+            let _ = c.emit("card-shown", ());
         }
     });
 }
 
 pub fn hide_card(app: &AppHandle) {
-    on_main(app, |app| { if let Some(c) = card(app) { let _ = c.hide(); } });
+    on_main(app, |app| {
+        if let Some(c) = card(app) {
+            let _ = c.emit("card-hide", ());               // lets the card save before it disappears
+            let _ = c.hide();
+        }
+        if let Some(k) = catcher(app) { let _ = k.hide(); }
+    });
 }
 
 pub fn toggle_card(app: &AppHandle) {
@@ -186,6 +226,15 @@ pub fn resize_card(app: &AppHandle, w: i32, h: i32) {
 pub fn set_pinned(app: &AppHandle, pinned: bool) {
     { let st = app.state::<State>(); st.0.lock().unwrap().pinned = pinned; }
     persist(app);
+    on_main(app, move |app| {
+        let open = card(app).and_then(|c| c.is_visible().ok()).unwrap_or(false);
+        if !open { return; }
+        if let (Some(c), Some(k)) = (card(app), catcher(app)) {
+            imp::keyboard(&c, !pinned);
+            if pinned { let _ = k.hide(); }
+            else { let _ = c.hide(); imp::show(&k); imp::show(&c); }    // catcher must sit below the card
+        }
+    });
 }
 
 fn prefs_path(app: &AppHandle) -> Option<std::path::PathBuf> {
