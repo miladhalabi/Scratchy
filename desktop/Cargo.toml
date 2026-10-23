@@ -1,0 +1,3 @@
+[workspace]
+resolver = "2"
+members = ["spike-layer/src-tauri", "apps/desktop/src-tauri"]

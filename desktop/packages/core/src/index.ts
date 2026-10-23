@@ -6,3 +6,4 @@ export * from "./ports";
 export * from "./sync";
 export * from "./oauth";
 export * from "./google";
+export * from "./theme";
