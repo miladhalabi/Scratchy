@@ -3,6 +3,7 @@ package com.scratchy.app
 import android.content.Context
 import android.content.res.Configuration
 import android.graphics.Color
+import android.os.Build
 import android.graphics.drawable.GradientDrawable
 import android.provider.Settings
 import android.view.MotionEvent
@@ -12,18 +13,123 @@ import androidx.dynamicanimation.animation.DynamicAnimation
 import androidx.dynamicanimation.animation.SpringAnimation
 import androidx.dynamicanimation.animation.SpringForce
 
-/** Shared look: colors, springs and press feedback. */
+/** Every color the app draws with. Built by [Palette]; the fixed sets are plain data so they can be tested. */
+data class Colors(
+    val accent: Int,
+    /** Text and icons placed on top of [accent] (white or near-black, whichever reads better). */
+    val onAccent: Int,
+    /** The accent as it would look in the opposite light/dark mode: for text on the inverse surface (undo bar). */
+    val accentInverse: Int,
+    /** A see-through wash of the accent for chips and highlights. */
+    val accentContainer: Int,
+    val background: Int,
+    val surface: Int,
+    /** Fully opaque so text behind the floating card never shows through. */
+    val floating: Int,
+    val text: Int,
+    val secondary: Int,
+    val hairline: Int,
+    /** Background of sliders, switches and segmented controls. */
+    val track: Int,
+    val danger: Int,
+    val success: Int,
+)
+
+object Contrast {
+    private fun lin(c: Int): Double { val v = c / 255.0; return if (v <= 0.03928) v / 12.92 else Math.pow((v + 0.055) / 1.055, 2.4) }
+    fun luminance(color: Int) =
+        0.2126 * lin((color shr 16) and 0xFF) + 0.7152 * lin((color shr 8) and 0xFF) + 0.0722 * lin(color and 0xFF)
+    fun ratio(a: Int, b: Int): Double {
+        val l1 = luminance(a); val l2 = luminance(b)
+        return (maxOf(l1, l2) + 0.05) / (minOf(l1, l2) + 0.05)
+    }
+    /** White or near-black, whichever stands out more against [bg]. */
+    fun onColor(bg: Int): Int = if (ratio(0xFFFFFFFF.toInt(), bg) >= ratio(0xFF101114.toInt(), bg)) 0xFFFFFFFF.toInt() else 0xFF101114.toInt()
+}
+
+/** Accent choices for the "Color" setting. The first entry, "wallpaper", follows the phone's Material You colors. */
+object Themes {
+    val names = listOf("wallpaper", "orange", "blue", "teal", "green", "purple")
+    val labels = listOf("Wallpaper", "Orange", "Blue", "Teal", "Green", "Purple")
+
+    /** Accent for a fixed theme: (light mode, dark mode). */
+    fun accent(name: String): Pair<Int, Int> = when (name) {
+        "orange" -> 0xFFA84C00.toInt() to 0xFFFFAB40.toInt()
+        "teal" -> 0xFF00796B.toInt() to 0xFF4DD0C0.toInt()
+        "green" -> 0xFF2E7D32.toInt() to 0xFF7FD18B.toInt()
+        "purple" -> 0xFF6B4EDD.toInt() to 0xFFB9A6FF.toInt()
+        else -> 0xFF1A5FD0.toInt() to 0xFF8AB4FF.toInt()          // blue, also the fallback when there is no wallpaper color
+    }
+
+    /** The calm neutral set, with the chosen accent. */
+    fun fixed(name: String, dark: Boolean): Colors {
+        val (aLight, aDark) = accent(name)
+        val acc = if (dark) aDark else aLight
+        val inv = if (dark) aLight else aDark
+        return Colors(
+            accent = acc, onAccent = Contrast.onColor(acc), accentInverse = inv,
+            accentContainer = (acc and 0xFFFFFF) or 0x2E000000,
+            background = if (dark) 0xFF0F1013.toInt() else 0xFFF2F3F5.toInt(),
+            surface = if (dark) 0xFF1C1E22.toInt() else 0xFFFFFFFF.toInt(),
+            floating = if (dark) 0xFF25272C.toInt() else 0xFFFFFFFF.toInt(),
+            text = if (dark) 0xFFECEEF1.toInt() else 0xFF14161A.toInt(),
+            secondary = if (dark) 0xFFA4A9B2.toInt() else 0xFF5B616B.toInt(),
+            hairline = if (dark) 0x33FFFFFF else 0x1F000000,
+            track = if (dark) 0xFF30333A.toInt() else 0xFFE3E5E9.toInt(),
+            danger = if (dark) 0xFFFF6B63.toInt() else 0xFFD93025.toInt(),
+            success = if (dark) 0xFF5DD58B.toInt() else 0xFF1E8E3E.toInt(),
+        )
+    }
+}
+
+/** Shared look: colors, springs and press feedback. Follows the wallpaper (Android 12+) unless a fixed color is chosen. */
 class Palette(ctx: Context) {
     val dark = (ctx.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) ==
         Configuration.UI_MODE_NIGHT_YES
-    val accent = Color.parseColor(if (dark) "#FF9F0A" else "#FF8A00")
-    val background = Color.parseColor(if (dark) "#000000" else "#F2F2F7")
-    val surface = Color.parseColor(if (dark) "#1C1C1E" else "#FFFFFF")
-    /** Fully opaque so text behind the card never shows through; the shadow and hairline separate it. */
-    val floating = Color.parseColor(if (dark) "#FF2A2A2D" else "#FFFFFFFF")
-    val text = Color.parseColor(if (dark) "#FFFFFF" else "#000000")
-    val secondary = Color.parseColor(if (dark) "#99FFFFFF" else "#8A8A8E")
-    val hairline = Color.parseColor(if (dark) "#33FFFFFF" else "#1F000000")
+
+    /** The "Color" setting: one of [Themes.names]. */
+    val theme: String = ctx.getSharedPreferences("overlay", Context.MODE_PRIVATE).getString("theme_color", "wallpaper") ?: "wallpaper"
+
+    private val c: Colors = if (theme == "wallpaper" && Build.VERSION.SDK_INT >= 31) fromWallpaper(ctx, dark) else
+        Themes.fixed(if (theme == "wallpaper") "blue" else theme, dark)
+
+    val accent = c.accent
+    val onAccent = c.onAccent
+    val accentInverse = c.accentInverse
+    val accentContainer = c.accentContainer
+    val background = c.background
+    val surface = c.surface
+    val floating = c.floating
+    val text = c.text
+    val secondary = c.secondary
+    val hairline = c.hairline
+    val track = c.track
+    val danger = c.danger
+    val success = c.success
+
+    /** Changes when the look changes (mode, wallpaper color or setting), so screens know to redraw. */
+    val signature = "$theme/$dark/${accent.toString(16)}/${background.toString(16)}"
+
+    @androidx.annotation.RequiresApi(31)
+    private fun fromWallpaper(ctx: Context, dark: Boolean): Colors {
+        fun col(id: Int) = ctx.getColor(id) or 0xFF000000.toInt()
+        val acc = col(if (dark) android.R.color.system_accent1_200 else android.R.color.system_accent1_600)
+        val inv = col(if (dark) android.R.color.system_accent1_600 else android.R.color.system_accent1_200)
+        val fallback = Themes.fixed("blue", dark)
+        val surface = col(if (dark) android.R.color.system_neutral1_800 else android.R.color.system_neutral1_0)
+        return Colors(
+            accent = acc, onAccent = Contrast.onColor(acc), accentInverse = inv,
+            accentContainer = (acc and 0xFFFFFF) or 0x2E000000,
+            background = col(if (dark) android.R.color.system_neutral1_900 else android.R.color.system_neutral1_50),
+            surface = surface,
+            floating = if (dark) col(android.R.color.system_neutral1_800) else col(android.R.color.system_neutral1_10),
+            text = col(if (dark) android.R.color.system_neutral1_100 else android.R.color.system_neutral1_900),
+            secondary = col(if (dark) android.R.color.system_neutral2_300 else android.R.color.system_neutral2_700),
+            hairline = fallback.hairline,
+            track = col(if (dark) android.R.color.system_neutral1_700 else android.R.color.system_neutral1_100),
+            danger = fallback.danger, success = fallback.success,
+        )
+    }
 }
 
 object Motion {
