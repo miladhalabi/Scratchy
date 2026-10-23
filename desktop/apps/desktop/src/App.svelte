@@ -3,6 +3,8 @@
   import { init, ready, applyTheme, local, createNote } from "./lib/state";
   import { startSync, noteEdited, onFocus, syncNotice } from "./lib/sync";
   import SyncPanel from "./lib/SyncPanel.svelte";
+  import VaultGate from "./lib/VaultGate.svelte";
+  import { vaultOpen, lock } from "./lib/vault";
   import NoteGrid from "./lib/NoteGrid.svelte";
   import Editor from "./lib/Editor.svelte";
   import type { Note } from "@scratchy/core";
@@ -10,15 +12,17 @@
   let editing: Note | null = $state(null);
   let deleted: Note | null = $state(null);
   let showSync = $state(false);
+  let gate = $state(false);
+  let vaultView = $state(false);
   let undoTimer: ReturnType<typeof setTimeout> | undefined;
 
   onMount(() => {
     applyTheme();
     matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => applyTheme());
-    init().then(() => { local.onEdit(noteEdited); void startSync(); });
+    init(() => { vaultView = false; gate = false; if (editing?.secret) editing = null; }).then(() => { local.onEdit(noteEdited); void startSync(); });
     addEventListener("focus", onFocus);
     const key = (e: KeyboardEvent) => {
-      if (e.ctrlKey && e.key.toLowerCase() === "n") { e.preventDefault(); editing = createNote(); }
+      if (e.ctrlKey && e.key.toLowerCase() === "n") { e.preventDefault(); editing = createNote(vaultView); }
     };
     addEventListener("keydown", key);
     return () => { removeEventListener("keydown", key); removeEventListener("focus", onFocus); };
@@ -41,8 +45,17 @@
   {#if editing}
     <Editor note={editing} onBack={() => (editing = null)} onDelete={remove} />
   {:else}
-    <NoteGrid onOpen={(n) => (editing = n)} onNew={() => (editing = createNote())} onSync={() => (showSync = true)} />
+    <NoteGrid
+      secretMode={vaultView}
+      onOpen={(n) => (editing = n)}
+      onNew={() => (editing = createNote(vaultView))}
+      onSync={() => (showSync = true)}
+      onVault={() => ($vaultOpen ? (vaultView = true) : (gate = true))}
+      onLeaveVault={() => (vaultView = false)}
+      onLock={() => lock()}
+    />
   {/if}
+  {#if gate}<VaultGate onOpen={() => { gate = false; vaultView = true; }} onClose={() => (gate = false)} />{/if}
   {#if showSync}<SyncPanel onClose={() => (showSync = false)} />{/if}
   {#if $syncNotice}
     <div class="undo" role="status"><span>{$syncNotice}</span><button onclick={() => syncNotice.set("")}>OK</button></div>

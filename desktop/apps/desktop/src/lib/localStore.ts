@@ -1,4 +1,4 @@
-import { type Note, type StateEntry, type Store, isBlank, noteFromJson, noteToJson, sameContent } from "@scratchy/core";
+import { type Note, type StateEntry, type Store, isBlank, noteFromJson, noteToJson, openSecret, sameContent, sealSecret } from "@scratchy/core";
 import { files } from "./files";
 
 const b64ToBytes = (s: string) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
@@ -14,6 +14,9 @@ export class LocalStore implements Store {
   private tombs: Record<string, number> = {};
   private state: Record<string, StateEntry> = {};
   private listeners = new Set<() => void>();
+  /** Protects the text of secret notes on disk. Kept in the OS keyring, never in the notes file. */
+  private dataKey: Uint8Array | null = null;
+  setDataKey(k: Uint8Array) { this.dataKey = k; }
   /** Called after any change to the notes (not for sync bookkeeping). */
   onChange(fn: () => void) { this.listeners.add(fn); return () => this.listeners.delete(fn); }
   private fire() { this.listeners.forEach((f) => f()); }
@@ -24,7 +27,14 @@ export class LocalStore implements Store {
 
   async load() {
     const n = await files.readText("notes.json");
-    if (n) for (const o of JSON.parse(n)) { const note = noteFromJson(o); this.map.set(note.id, note); }
+    if (n) for (const o of JSON.parse(n)) {
+      const note = noteFromJson(o);
+      if (o.secret && o.enc && this.dataKey) {            // secret text is stored sealed
+        const t = await openSecret(this.dataKey, o.enc);
+        note.title = t?.title ?? ""; note.body = t ? t.body : "(unreadable)";
+      }
+      this.map.set(note.id, note);
+    }
     const d = await files.readText("deleted.json");
     if (d) this.tombs = JSON.parse(d);
     const s = await files.readText("sync_state.json");
@@ -41,7 +51,16 @@ export class LocalStore implements Store {
   }
 
   private async persistNotes() {
-    await files.writeText("notes.json", JSON.stringify([...this.map.values()].map(noteToJson)));
+    const out: Record<string, unknown>[] = [];
+    for (const n of this.map.values()) {
+      const o = noteToJson(n);
+      if (n.secret && this.dataKey) {                    // never write the text of a secret note in the clear
+        o.enc = await sealSecret(this.dataKey, { title: n.title, body: n.body });
+        o.title = ""; o.body = "";
+      }
+      out.push(o);
+    }
+    await files.writeText("notes.json", JSON.stringify(out));
     await files.writeText("deleted.json", JSON.stringify(this.tombs));
   }
 

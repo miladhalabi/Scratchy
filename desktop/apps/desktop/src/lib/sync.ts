@@ -6,6 +6,7 @@ import {
   refreshAccessToken, relayChanges, roomId, syncNow as coreSync, toBase64, type OAuthClient, type Relay, type SyncDeps, type Tokens,
 } from "@scratchy/core";
 import { files } from "./files";
+import { secrets } from "./secrets";
 import { local } from "./state";
 
 /**
@@ -67,7 +68,11 @@ async function loadDevice() {
 /** Call once at app start: picks up a saved connection and starts syncing. */
 export async function startSync() {
   await loadDevice();
-  const a = await files.readText("sync_auth.json");
+  let a = await secrets.get("sync-auth");
+  if (!a) {                                             // an older version kept it in a file: move it to the keyring
+    a = await files.readText("sync_auth.json");
+    if (a) { await secrets.set("sync-auth", a); await files.removeText("sync_auth.json"); }
+  }
   if (!a) return;
   try {
     auth = JSON.parse(a) as Auth;
@@ -106,7 +111,7 @@ export async function connectGoogle(password: string) {
   key = k;
   auth.key = toBase64(k);
   room = await roomId(k);
-  await files.writeText("sync_auth.json", JSON.stringify(auth));
+  await secrets.set("sync-auth", JSON.stringify(auth));
   begin();
 }
 
@@ -114,6 +119,7 @@ export async function disconnect() {
   clearInterval(timer); clearTimeout(fastTimer); clearTimeout(slowTimer);
   live?.close(); live = null;
   auth = null; key = null; tokens = null;
+  await secrets.delete("sync-auth");
   await files.removeText("sync_auth.json");
   await files.writeText("sync_state.json", "{}");
   set("off", "Not connected");

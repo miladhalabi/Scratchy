@@ -169,6 +169,37 @@ fn open_url(url: String) -> Result<(), String> {
     c.arg(&url).spawn().map(|_| ()).map_err(|e| e.to_string())
 }
 
+const KEYRING_SERVICE: &str = "com.scratchy.desktop";
+
+/// The operating system's secret store (Secret Service on Linux, Credential Manager, Keychain).
+/// Returns Ok(None) when the secret doesn't exist yet and Err when no store is available.
+#[tauri::command]
+fn secret_get(name: String) -> Result<Option<String>, String> {
+    safe(&name)?;
+    let e = keyring::Entry::new(KEYRING_SERVICE, &name).map_err(|e| e.to_string())?;
+    match e.get_password() {
+        Ok(v) => Ok(Some(v)),
+        Err(keyring::Error::NoEntry) => Ok(None),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+#[tauri::command]
+fn secret_set(name: String, value: String) -> Result<(), String> {
+    safe(&name)?;
+    keyring::Entry::new(KEYRING_SERVICE, &name).map_err(|e| e.to_string())?
+        .set_password(&value).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn secret_delete(name: String) -> Result<(), String> {
+    safe(&name)?;
+    match keyring::Entry::new(KEYRING_SERVICE, &name).map_err(|e| e.to_string())?.delete_credential() {
+        Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
 #[tauri::command]
 fn data_path(app: AppHandle) -> Result<String, String> {
     Ok(dir(&app, None)?.to_string_lossy().into_owned())
@@ -180,7 +211,7 @@ fn main() {
         .manage(Oauth(Mutex::new(None)))
         .invoke_handler(tauri::generate_handler![
             read_text, write_text, remove_text, read_attachment, write_attachment, has_attachment, data_path,
-            google_client, oauth_start, oauth_wait, open_url
+            google_client, oauth_start, oauth_wait, open_url, secret_get, secret_set, secret_delete
         ])
         .run(tauri::generate_context!())
         .expect("error while running Scratchy");
