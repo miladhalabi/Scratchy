@@ -2881,6 +2881,7 @@ dependencies = [
 name = "spike-layer"
 version = "0.0.1"
 dependencies = [
+ "gdk",
  "gtk",
  "gtk-layer-shell",
  "tauri",

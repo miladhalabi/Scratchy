@@ -9,6 +9,7 @@ fn layer_window(app: &AppHandle, label: &str, url: &str, w: f64, h: f64, left_ma
         .shadow(false)
         .visible(false)
         .inner_size(w, h)
+        .on_page_load(|w, p| eprintln!("[spike] page load {:?} {} {}", p.event(), w.label(), p.url()))
         .build()
         .expect("window");
     let gtk_win = win.gtk_window().expect("gtk window");
@@ -23,7 +24,9 @@ fn layer_window(app: &AppHandle, label: &str, url: &str, w: f64, h: f64, left_ma
     gtk_win.set_exclusive_zone(-1);
     gtk_win.set_keyboard_mode(if keyboard { KeyboardMode::OnDemand } else { KeyboardMode::None });
     eprintln!("[spike] {label}: is_layer_window = {}", gtk_win.is_layer_window());
-    win.show().expect("show");
+    gtk_win.set_size_request(w as i32, h as i32);
+    gtk_win.show_all();
+    eprintln!("[spike] {label}: mapped = {}, visible = {}", gtk_win.is_mapped(), gtk_win.is_visible());
 }
 
 #[tauri::command]

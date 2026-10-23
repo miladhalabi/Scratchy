@@ -9,4 +9,9 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 tauri = { version = "2", features = ["unstable"] }
 gtk = "0.18"
+gdk = "0.18"
 gtk-layer-shell = { version = "0.8", features = ["v0_6"] }
+
+[features]
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]
