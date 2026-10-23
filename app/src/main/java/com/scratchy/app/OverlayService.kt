@@ -107,6 +107,7 @@ class OverlayService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        Live.acquire(this, "service")          // real-time sync while the edge bar is on
         wm = getSystemService(WINDOW_SERVICE) as WindowManager
         ui = ContextThemeWrapper(this, android.R.style.Theme_Material_Light)
         pal = Palette(this)
@@ -125,6 +126,7 @@ class OverlayService : Service() {
     }
 
     override fun onDestroy() {
+        Live.release("service")
         if (::overlayPrefs.isInitialized) overlayPrefs.unregisterOnSharedPreferenceChangeListener(sideListener)
         removeDismissCatcher()
         genieViews.forEach { runCatching { wm.removeView(it) } }
@@ -286,6 +288,12 @@ class OverlayService : Service() {
                 }
             }
             true
+        }
+        // A swipe that starts on the bar must reach the bar, not the phone's edge Back gesture.
+        if (Build.VERSION.SDK_INT >= 29) {
+            zone.addOnLayoutChangeListener { v, l, t, r, b, _, _, _, _ ->
+                v.systemGestureExclusionRects = listOf(android.graphics.Rect(0, 0, r - l, b - t))
+            }
         }
         wm.addView(zone, zoneParams)
         scheduleTuck(2000)
@@ -452,6 +460,10 @@ class OverlayService : Service() {
             if (!it.isBlank) CardNote.remember(this, it.id)
         }
         editor = ed
+        Sync.onChangedCard = {                      // a sync changed notes while the card is open
+            NoteStore.get(this, ed.note.id)?.let { ed.refreshFrom(it) }
+        }
+        Sync.syncIfStale(this)
         if (shotMode() == "auto") {
             pendingShot?.let { ed.addImage(it); clearPending.run(); main.removeCallbacks(clearPending) }
         }
@@ -485,6 +497,41 @@ class OverlayService : Service() {
             ).show()
         }
         pinRef[0] = pinBtn
+        // Secret toggle: marks the note in the card as secret (hidden from lists, encrypted, not offered again by the card).
+        var secretHere = false                        // made secret in this card session, so it can be undone without unlocking
+        val lockRef = arrayOfNulls<android.widget.ImageView>(1)
+        val lockBtn = ui.iconButton(
+            R.drawable.ic_lock, if (startNote.secret) pal.accent else pal.secondary, "Secret note"
+        ) {
+            val on = !ed.note.secret
+            when {
+                on && !Vault.isSetUp(this) -> {
+                    Toast.makeText(this, "Set up secret notes first", Toast.LENGTH_SHORT).show()
+                    startActivity(Intent(this, MainActivity::class.java)
+                        .putExtra(MainActivity.EXTRA_SECRET, true).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                    collapse()
+                }
+                !on && !secretHere && !Vault.isOpen() ->
+                    Toast.makeText(this, "Unlock secret notes first", Toast.LENGTH_SHORT).show()
+                else -> {
+                    if (on) secretHere = true
+                    ed.setSecret(on)
+                    lockRef[0]?.setColorFilter(if (on) pal.accent else pal.secondary)
+                    lockRef[0]?.let {
+                        it.scaleX = 1.3f; it.scaleY = 1.3f
+                        Motion.spring(it, DynamicAnimation.SCALE_X, 1f, 0.5f, 0.3f)
+                        Motion.spring(it, DynamicAnimation.SCALE_Y, 1f, 0.5f, 0.3f)
+                    }
+                    Toast.makeText(this, if (on) "Secret. Find it under the lock in the app." else "No longer secret",
+                        Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+        lockRef[0] = lockBtn
+        ed.onLoaded = { n ->
+            secretHere = false
+            lockRef[0]?.setColorFilter(if (n.secret) pal.accent else pal.secondary)
+        }
         var showContinuing: (Note?) -> Unit = {}     // set once the "Continuing" row exists (below)
         var hideChooser: () -> Unit = {}             // set once the screenshot chooser exists (below)
         var attachAfterPick: Uri? = null             // screenshot waiting for "Other note" to be chosen
@@ -517,6 +564,7 @@ class OverlayService : Service() {
                 addView(View(ui).apply { background = roundRect(pal.hairline, dp(2).toFloat()) },
                     FrameLayout.LayoutParams(dp(36), dp(4), Gravity.CENTER))
             }, LinearLayout.LayoutParams(0, -1, 1f))
+            addView(lockBtn, LinearLayout.LayoutParams(dp(36), dp(40)))
             addView(pinBtn, LinearLayout.LayoutParams(dp(36), dp(40)))
         }
 
@@ -614,7 +662,7 @@ class OverlayService : Service() {
             }, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(10) })
             val cur = currentNote()
             if (cur != null) chooserCol.addView(
-                choice("Current note", cur.heading.ifEmpty { "Untitled" }, filled = true) {
+                choice("Current note", if (cur.secret) "Secret note" else cur.heading.ifEmpty { "Untitled" }, filled = true) {
                     if (ed.note.id != cur.id) { ed.commit(); ed.load(cur); CardNote.remember(this, cur.id) }
                     showContinuing(cur)
                     attachNow(uri)
@@ -864,7 +912,7 @@ class OverlayService : Service() {
             ed.commit(); ed.load(NoteStore.newNote()); close(); picked(null); ed.bodyEdit.requestFocus()
             // a fresh note is only remembered once it has text (see the editor callback)
         }
-        NoteStore.all(this).take(10).forEach { n ->
+        NoteStore.list(this).take(10).forEach { n ->
             row((if (n.pinned) "📌 " else "") + n.heading.ifEmpty { "Untitled" }, false) {
                 ed.commit(); ed.load(n); CardNote.remember(this, n.id); close(); picked(n); ed.bodyEdit.requestFocus()
             }
@@ -881,6 +929,7 @@ class OverlayService : Service() {
         showShotPrompt = null
         hideChooserRef = null
         removeDismissCatcher()
+        Sync.onChangedCard = null
         editor?.commit()
         editor = null
         (getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager)
@@ -923,7 +972,7 @@ class OverlayService : Service() {
                     // The card fades via the crossfade; keep the window so its blur can fade out with the genie.
                     animateBlur(p, wlp, blurNow, 0, genieMs(480)) { removePanel() }
                 } else {
-                    main.postDelayed({ removePanel() }, genieMs(300))   // after the crossfade has handed over
+                    main.postDelayed({ removePanel() }, 140)   // just after the quick crossfade has handed over
                 }
             }
             else -> {
@@ -1060,7 +1109,7 @@ class OverlayService : Service() {
 
         if (!opening) {
             gv.fade = 0f
-            crossfade(false, genieMs(260)) {}   // live card out, snapshot in, as the genie starts
+            crossfade(false, 70) {}                // live card out, snapshot in: fixed and quick, so no ghost of the real card shows beside the warping copy
         }
         ValueAnimator.ofFloat(0f, 1f).apply {
             duration = genieMs(if (opening) 420 else 480)
@@ -1072,7 +1121,7 @@ class OverlayService : Service() {
             addListener(object : AnimatorListenerAdapter() {
                 override fun onAnimationEnd(animation: Animator) {
                     onEnd()
-                    if (opening) crossfade(true, genieMs(260)) { live.alpha = 1f; main.postDelayed({ removeSnapshot() }, 16) }
+                    if (opening) crossfade(true, 260) { live.alpha = 1f; main.postDelayed({ removeSnapshot() }, 16) }
                     else main.postDelayed({ removeSnapshot() }, 16)
                 }
             })

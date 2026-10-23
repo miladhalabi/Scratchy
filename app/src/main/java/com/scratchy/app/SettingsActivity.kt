@@ -1,6 +1,7 @@
 package com.scratchy.app
 
 import android.app.Activity
+import android.app.AlertDialog
 import android.content.ClipboardManager
 import android.graphics.Color
 import android.graphics.Typeface
@@ -16,9 +17,129 @@ import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import android.widget.Toast
 
 /** All settings, grouped into cards. Everything is stored on this phone. */
 class SettingsActivity : Activity() {
+
+    private var syncUi: () -> Unit = {}
+    private var syncBusy = false
+    private var syncPassword: String? = null
+    private lateinit var syncNewPw: TextView
+
+    private fun passwordField(hint: String) = EditText(this).apply {
+        this.hint = hint
+        inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+        setSingleLine(true)
+    }
+
+    private fun passwordDialog(title: String, message: String, fields: List<EditText>, onOk: (List<String>) -> Unit) {
+        val box = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(24), dp(8), dp(24), dp(0))
+            fields.forEach { addView(it) }
+        }
+        AlertDialog.Builder(this).setTitle(title).setMessage(message).setView(box)
+            .setPositiveButton("OK") { _, _ -> onOk(fields.map { it.text.toString() }) }
+            .setNegativeButton("Cancel", null).show()
+    }
+
+    private fun changePassword() {
+        if (!Vault.isSetUp(this)) {
+            Toast.makeText(this, "No vault password yet. Pull down the notes list to set one.", Toast.LENGTH_LONG).show(); return
+        }
+        passwordDialog("Change vault password", "Enter your current password, then the new one.",
+            listOf(passwordField("Current password"), passwordField("New password"), passwordField("Repeat new password"))) { (old, new, again) ->
+            when {
+                !Vault.checkPassword(this, old) -> Toast.makeText(this, "Current password is wrong", Toast.LENGTH_SHORT).show()
+                new.length < 4 -> Toast.makeText(this, "Use at least 4 characters", Toast.LENGTH_SHORT).show()
+                new != again -> Toast.makeText(this, "The new passwords don't match", Toast.LENGTH_SHORT).show()
+                !Sync.connected(this) -> { Vault.setPassword(this, new); Toast.makeText(this, "Password changed", Toast.LENGTH_SHORT).show() }
+                else -> {
+                    syncBusy = true; syncUi()
+                    Sync.rekey(this, new) { out ->
+                        syncBusy = false
+                        if (out.ok) Vault.setPassword(this, new)         // only once Drive has the new key
+                        Toast.makeText(this, if (out.ok) "Password changed" else out.message, Toast.LENGTH_LONG).show()
+                        syncUi()
+                    }
+                }
+            }
+        }
+    }
+
+    /** This device missed a password change made elsewhere: take the new password and rejoin. */
+    private fun enterNewPassword() {
+        passwordDialog("New vault password", "Enter the vault password you set on your other device.",
+            listOf(passwordField("New password"))) { (pw) ->
+            syncBusy = true; syncUi()
+            Sync.run(this, pw) { out ->
+                syncBusy = false
+                if (out.ok) Vault.setPassword(this, pw)
+                else Toast.makeText(this, out.message, Toast.LENGTH_LONG).show()
+                syncUi()
+            }
+        }
+    }
+
+    /** Connects (asks for the vault password) or, when already connected, syncs now. */
+    private fun startSync() {
+        if (syncBusy) return
+        if (Sync.connected(this)) { runSync(null); return }
+        if (!Vault.isSetUp(this)) {
+            Toast.makeText(this, "Set a vault password first: pull down the notes list", Toast.LENGTH_LONG).show()
+            return
+        }
+        val input = EditText(this).apply {
+            hint = "Vault password"
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+            setPadding(dp(24), dp(16), dp(24), dp(16))
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Connect Google Drive")
+            .setMessage("Enter your vault password. It encrypts your notes before they leave this phone.")
+            .setView(input)
+            .setPositiveButton("Connect") { _, _ ->
+                val pw = input.text.toString()
+                if (Vault.checkPassword(this, pw)) runSync(pw)
+                else Toast.makeText(this, "Wrong vault password", Toast.LENGTH_SHORT).show()
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun runSync(password: String?) {
+        syncBusy = true; syncPassword = password; syncUi()
+        Sync.run(this, password) { out ->
+            syncBusy = false
+            val consent = out.consent
+            if (consent != null) {          // Google wants the user to approve Drive access
+                runCatching {
+                    startIntentSenderForResult(consent.intentSender, REQ_CONSENT, null, 0, 0, 0)
+                }.onFailure { Toast.makeText(this, "Couldn't open Google sign-in", Toast.LENGTH_LONG).show() }
+            } else if (!out.ok) Toast.makeText(this, out.message, Toast.LENGTH_LONG).show()
+            syncUi()
+        }
+    }
+
+    @Deprecated("Deprecated in Java")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: android.content.Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == REQ_CONSENT) {
+            val why = runCatching {
+                com.google.android.gms.auth.api.identity.Identity.getAuthorizationClient(this)
+                    .getAuthorizationResultFromIntent(data)
+                null
+            }.getOrElse { e ->
+                (e as? com.google.android.gms.common.api.ApiException)
+                    ?.let { "code ${it.statusCode} ${com.google.android.gms.common.api.CommonStatusCodes.getStatusCodeString(it.statusCode)}" }
+                    ?: e.javaClass.simpleName + " " + e.message
+            }
+            android.util.Log.w("ScratchySync", "consent result=$resultCode why=$why data=$data")
+            if (resultCode == RESULT_OK && why == null) runSync(syncPassword)
+            else Toast.makeText(this, "Drive access wasn't allowed ($why, result $resultCode)", Toast.LENGTH_LONG).show()
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         val pal = Palette(this)
@@ -206,6 +327,56 @@ class SettingsActivity : Activity() {
             }
         })
 
+        // ---- SYNC ----
+        page.addView(groupHeader(pal, "Sync"))
+        val syncStatus = TextView(this).apply { textSize = 14f; setTextColor(pal.secondary); setPadding(dp(2), dp(10), 0, 0) }
+        val syncMain = TextView(this)
+        val syncOff = TextView(this)
+        syncNewPw = TextView(this)
+        fun syncButton(t: TextView, filled: Boolean, onTap: () -> Unit) = t.apply {
+            textSize = 16f; gravity = Gravity.CENTER
+            setTextColor(if (filled) Color.WHITE else pal.accent)
+            typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+            background = if (filled) roundRect(pal.accent, dp(14).toFloat()) else null
+            pressable(0.97f) { onTap() }
+        }
+        syncUi = {
+            val on = Sync.connected(this)
+            syncMain.text = if (on) "Sync now" else "Connect Google Drive"
+            syncOff.visibility = if (on) View.VISIBLE else View.GONE
+            syncNewPw.visibility = if (Sync.needsNewPassword(this)) View.VISIBLE else View.GONE
+            syncStatus.text = if (syncBusy) "Syncing…" else Sync.status(this).ifEmpty { if (on) "Connected" else "Not connected" }
+        }
+        page.addView(GroupCard(this, pal).apply {
+            row {
+                caption(pal, "Keeps your notes, secret notes and images in sync across your devices through the hidden app folder of your Google Drive. Everything is encrypted on the phone first with a key made from your vault password, so Google can't read it. Use the same vault password on every device. If you forget it, the synced copy can't be recovered.")
+            }
+            row {
+                title(pal, "Vault password")
+                caption(pal, "Opens secret notes and encrypts your synced notes. Changing it re-encrypts everything in Drive; enter the new one on your other devices afterwards.")
+                addView(TextView(context).apply {
+                    text = "Change vault password"; textSize = 15f; setTextColor(pal.accent)
+                    typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+                    setPadding(dp(2), dp(10), dp(8), dp(2))
+                    pressable(0.97f) { changePassword() }
+                })
+                addView(syncNewPw.apply {
+                    text = "Enter the new vault password"; textSize = 15f; setTextColor(pal.accent)
+                    typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+                    setPadding(dp(2), dp(6), dp(8), dp(2))
+                    pressable(0.97f) { enterNewPassword() }
+                })
+            }
+            row {
+                addView(syncButton(syncMain, true) { startSync() }, LinearLayout.LayoutParams(-1, dp(46)))
+                addView(syncStatus)
+                addView(syncButton(syncOff, false) {
+                    Sync.disconnect(this@SettingsActivity); syncUi()
+                }, LinearLayout.LayoutParams(-1, dp(40)).apply { topMargin = dp(6) })
+            }
+        })
+        syncUi()
+
         // ---- AI TITLES ----
         page.addView(groupHeader(pal, "AI titles"))
         fun field(name: String, hint: String, secret: Boolean): EditText = EditText(this).apply {
@@ -280,4 +451,6 @@ class SettingsActivity : Activity() {
             addView(page)
         })
     }
+
+    companion object { private const val REQ_CONSENT = 41 }
 }

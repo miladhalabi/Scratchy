@@ -20,12 +20,15 @@ object CardNote {
         prefs(ctx).edit().putString("lastCardNote", id).putLong("lastCardAt", System.currentTimeMillis()).apply()
 
     /** The note the card last worked on, however old, or null. */
-    fun lastNote(ctx: Context): Note? =
-        prefs(ctx).getString("lastCardNote", null)?.let { NoteStore.get(ctx, it) }
+    fun lastNote(ctx: Context): Note? = lastSaved(ctx)
+
+    /** Secret notes are never offered by the card, so reopening it never shows one. */
+    private fun lastSaved(ctx: Context): Note? =
+        prefs(ctx).getString("lastCardNote", null)?.let { NoteStore.get(ctx, it) }?.takeIf { !it.secret }
 
     /** The note to show, and whether it is an existing one (true) or a fresh blank (false). */
     fun pick(ctx: Context): Pair<Note, Boolean> {
-        val last = prefs(ctx).getString("lastCardNote", null)?.let { NoteStore.get(ctx, it) }
+        val last = lastSaved(ctx)
         return when (mode(ctx)) {
             "new" -> NoteStore.newNote() to false
             "last" -> last?.let { it to true } ?: (NoteStore.newNote() to false)

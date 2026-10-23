@@ -4,6 +4,7 @@ import android.app.Activity
 import android.app.AlertDialog
 import android.app.Dialog
 import android.graphics.BitmapFactory
+import android.content.Intent
 import android.os.Bundle
 import android.view.View
 import android.widget.Toast
@@ -16,6 +17,8 @@ class NoteActivity : Activity() {
 
     private lateinit var editor: NoteEditor
     private lateinit var pinButton: ImageView
+    private var it0: View? = null
+    private var refreshFromStore: (() -> Unit)? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         val pal = Palette(this)
@@ -31,7 +34,10 @@ class NoteActivity : Activity() {
             View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
 
         val existing = intent.getStringExtra(EXTRA_ID)?.let { NoteStore.get(this, it) }
-        val note = existing ?: NoteStore.newNote()
+        val wantSecret = existing?.secret ?: intent.getBooleanExtra(MainActivity.EXTRA_SECRET, false)
+        if (wantSecret && !Vault.isOpen()) { finish(); return }     // never show a secret note while locked
+        if (wantSecret) window.setFlags(WindowManager.LayoutParams.FLAG_SECURE, WindowManager.LayoutParams.FLAG_SECURE)
+        val note = existing ?: NoteStore.newNote().copy(secret = wantSecret)
         editor = NoteEditor(this, pal, note, compact = false, onOpenImage = { showImage(it) }) {
             NoteStore.save(this, it)
         }
@@ -42,6 +48,32 @@ class NoteActivity : Activity() {
             editor.setPinned(!editor.note.pinned); tint(editor.note.pinned)
         }
         tint(note.pinned)
+
+        var madeSecretHere = wantSecret && existing == null
+        val lockButton = iconButton(R.drawable.ic_lock, if (note.secret) pal.accent else pal.secondary, "Secret note") {
+            val on = !editor.note.secret
+            if (on && !Vault.isSetUp(this)) {
+                Toast.makeText(this, "Set up secret notes first", Toast.LENGTH_SHORT).show()
+                startActivity(Intent(this, MainActivity::class.java).putExtra(MainActivity.EXTRA_SECRET, true))
+            } else if (!on && !madeSecretHere && !Vault.isOpen()) {
+                Toast.makeText(this, "Unlock secret notes first", Toast.LENGTH_SHORT).show()
+            } else {
+                if (on) madeSecretHere = true
+                editor.setSecret(on)
+                (it0 as ImageView).setColorFilter(if (on) pal.accent else pal.secondary)
+                Toast.makeText(this, if (on) "Secret. Find it under the lock." else "No longer secret", Toast.LENGTH_SHORT).show()
+            }
+        }
+        it0 = lockButton
+
+        // A sync brought in a newer copy of this note while it is open: show it (unless there are unsaved edits here).
+        refreshFromStore = {
+            NoteStore.get(this, editor.note.id)?.let { n ->
+                editor.refreshFrom(n)
+                tint(editor.note.pinned)
+                (it0 as? ImageView)?.setColorFilter(if (editor.note.secret) pal.accent else pal.secondary)
+            }
+        }
 
         val top = LinearLayout(this).apply {
             gravity = android.view.Gravity.CENTER_VERTICAL
@@ -58,6 +90,7 @@ class NoteActivity : Activity() {
                     Toast.makeText(this@NoteActivity, "Allow photo access in the notes list first", Toast.LENGTH_LONG).show()
                 }
             }, LinearLayout.LayoutParams(dp(44), dp(44)))
+            addView(lockButton, LinearLayout.LayoutParams(dp(44), dp(44)))
             addView(pinButton, LinearLayout.LayoutParams(dp(44), dp(44)))
             addView(iconButton(R.drawable.ic_delete, pal.secondary, "Delete") { confirmDelete() },
                 LinearLayout.LayoutParams(dp(44), dp(44)))
@@ -99,8 +132,22 @@ class NoteActivity : Activity() {
     }
 
     override fun onPause() {
-        editor.commit()
+        if (Sync.onChangedNote === refreshFromStore) Sync.onChangedNote = null
+        Live.release("note")
+        if (::editor.isInitialized) editor.commit()
         super.onPause()
+    }
+
+    override fun onStop() {
+        if (::editor.isInitialized && editor.note.secret) Vault.left()
+        super.onStop()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        Sync.onChangedNote = refreshFromStore
+        Live.acquire(this, "note")            // keep the instant connection open while a note is on screen
+        if (::editor.isInitialized && editor.note.secret) Vault.returned()
     }
 
     companion object {

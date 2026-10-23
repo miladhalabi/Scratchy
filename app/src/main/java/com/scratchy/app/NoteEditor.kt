@@ -1,5 +1,6 @@
 package com.scratchy.app
 
+import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.graphics.Outline
@@ -24,6 +25,7 @@ import android.widget.FrameLayout
 import android.widget.HorizontalScrollView
 import android.widget.ImageView
 import android.widget.LinearLayout
+import android.widget.TextView
 import android.widget.Toast
 import java.io.File
 
@@ -44,8 +46,30 @@ class NoteEditor(
         private set
     /** Called when a text field is touched (before it takes focus). Lets a non-focusable card become focusable. */
     var onTouched: ((View) -> Unit)? = null
-    val titleEdit = EditText(ctx)
-    val bodyEdit = EditText(ctx)
+    /** Called whenever a different note is loaded into the editor. */
+    var onLoaded: ((Note) -> Unit)? = null
+    /** An EditText that tells the editor when its selection changes (used for the card's own copy/paste menu). */
+    private inner class Edit(ctx: Context) : EditText(ctx) {
+        override fun onSelectionChanged(selStart: Int, selEnd: Int) {
+            super.onSelectionChanged(selStart, selEnd)
+            selectionChanged(this)
+        }
+    }
+    val titleEdit: EditText = Edit(ctx)
+    val bodyEdit: EditText = Edit(ctx)
+
+    // The floating card is an overlay window, which cannot show Android's own Copy/Paste bar.
+    // So the card gets its own small menu: Select all, Cut, Copy, Paste.
+    private var ready = false
+    private var menuTarget: EditText? = null
+    private var menuByLongPress = false
+    private val menuRow = LinearLayout(ctx).apply {
+        gravity = Gravity.CENTER_VERTICAL
+        visibility = View.GONE
+        setPadding(dp(2), dp(8), dp(2), dp(2))
+    }
+    private val menuCut by lazy { menuItem("Cut") { copySelection(cut = true) } }
+    private val menuCopy by lazy { menuItem("Copy") { copySelection(cut = false) } }
 
     private val palette = pal
     private val images = note.images.toMutableList()
@@ -98,6 +122,10 @@ class NoteEditor(
         }, LayoutParams(-1, -2))
         addView(View(ctx).apply { setBackgroundColor(pal.hairline) },
             LayoutParams(-1, 1).apply { marginStart = dp(4); marginEnd = dp(4) })
+        addView(menuRow, LayoutParams(-1, -2))
+        menuItem("Select all") { target().selectAll() }
+        menuCut; menuCopy
+        menuItem("Paste") { target().requestFocus(); pasteFromClipboard(); hideMenu() }
         suggestScroll.apply {
             isHorizontalScrollBarEnabled = false
             visibility = View.GONE
@@ -139,6 +167,7 @@ class NoteEditor(
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
             override fun afterTextChanged(e: Editable?) {
                 if (!suppress) { handler.removeCallbacks(autosave); handler.postDelayed(autosave, 500) }
+                if (compactMode && !suppress) hideMenu()
             }
         }
         titleEdit.addTextChangedListener(schedule)
@@ -173,13 +202,69 @@ class NoteEditor(
             }
         })
         bodyEdit.setOnTouchListener { v, ev ->
-            if (ev.actionMasked == MotionEvent.ACTION_DOWN) onTouched?.invoke(v)
+            if (ev.actionMasked == MotionEvent.ACTION_DOWN) { menuByLongPress = false; onTouched?.invoke(v) }
             detector.onTouchEvent(ev); false
         }
         titleEdit.setOnTouchListener { v, ev ->
-            if (ev.actionMasked == MotionEvent.ACTION_DOWN) onTouched?.invoke(v)
+            if (ev.actionMasked == MotionEvent.ACTION_DOWN) { menuByLongPress = false; onTouched?.invoke(v) }
             false
         }
+        if (compact) for (e in listOf(titleEdit, bodyEdit)) {
+            e.setOnLongClickListener {
+                menuByLongPress = true
+                menuTarget = e
+                showMenu()
+                refreshMenu()
+                false            // let Android still select the word
+            }
+        }
+        ready = true
+    }
+
+    // ---- the card's own copy / paste menu ----
+
+    private fun menuItem(label: String, onTap: () -> Unit): TextView = TextView(context).apply {
+        text = label
+        setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
+        setTextColor(palette.accent)
+        typeface = android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL)
+        setPadding(dp(12), dp(7), dp(12), dp(7))
+        background = roundRect(palette.hairline, dp(14).toFloat())
+        pressable(0.95f) { onTap() }
+    }.also { menuRow.addView(it, LayoutParams(-2, -2).apply { marginEnd = dp(6) }) }
+
+    private fun target(): EditText = menuTarget ?: if (titleEdit.hasFocus()) titleEdit else bodyEdit
+
+    private fun showMenu() { menuRow.visibility = View.VISIBLE }
+
+    private fun hideMenu() { menuByLongPress = false; menuRow.visibility = View.GONE }
+
+    /** Cut and Copy only make sense with something selected; dim them otherwise. */
+    private fun refreshMenu() {
+        val t = target()
+        val has = t.selectionStart != t.selectionEnd
+        menuCut.alpha = if (has) 1f else 0.35f
+        menuCopy.alpha = if (has) 1f else 0.35f
+    }
+
+    private fun selectionChanged(v: EditText) {
+        if (!ready || !compactMode) return
+        menuTarget = v
+        if (v.selectionStart != v.selectionEnd) showMenu()
+        else if (!menuByLongPress) hideMenu()
+        refreshMenu()
+    }
+
+    private fun copySelection(cut: Boolean) {
+        val t = target()
+        val a = minOf(t.selectionStart, t.selectionEnd)
+        val b = maxOf(t.selectionStart, t.selectionEnd)
+        if (a < 0 || a == b) return
+        context.getSystemService(ClipboardManager::class.java)
+            .setPrimaryClip(ClipData.newPlainText("Scratchy", t.text.subSequence(a, b)))
+        if (cut) t.text.delete(a, b)
+        Toast.makeText(context, if (cut) "Cut" else "Copied", Toast.LENGTH_SHORT).show()
+        hideMenu()
     }
 
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
@@ -218,6 +303,20 @@ class NoteEditor(
         editing = false
     }
 
+    /**
+     * A sync brought in a newer copy of the note being edited. Show it, unless there are unsaved edits
+     * here (then those win and get saved in a moment).
+     */
+    fun refreshFrom(n: Note) {
+        if (n.id != note.id) return
+        if (titleEdit.text.toString() != note.title || bodyEdit.text.toString() != note.body) return   // unsaved typing wins
+        if (n.sameContent(note)) { note = n; return }                      // nothing to show, just catch up the counters
+        if (n.rev < note.rev || (n.rev == note.rev && n.updatedAt <= note.updatedAt)) return
+        val sel = bodyEdit.selectionStart.coerceAtLeast(0)
+        load(n)
+        bodyEdit.setSelection(minOf(sel, bodyEdit.text.length))
+    }
+
     fun load(n: Note) {
         suppress = true
         note = n
@@ -227,6 +326,7 @@ class NoteEditor(
         bodyEdit.setSelection(bodyEdit.text.length)
         suppress = false
         renderImages()
+        onLoaded?.invoke(n)
     }
 
     /** Copies the image into the app, shows it as a thumbnail and saves the note. */
@@ -273,6 +373,10 @@ class NoteEditor(
                 android.content.Intent(context, SettingsActivity::class.java)
                     .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
             )
+            return
+        }
+        if (note.secret) {
+            Toast.makeText(context, "Titles by AI are off for secret notes", Toast.LENGTH_SHORT).show()
             return
         }
         val body = bodyEdit.text.toString().trim()
@@ -372,6 +476,12 @@ class NoteEditor(
     fun setPinned(pinned: Boolean) {
         commit()
         note = note.copy(pinned = pinned, images = images.toList())
+        onChanged(note)
+    }
+
+    fun setSecret(secret: Boolean) {
+        commit()
+        note = note.copy(secret = secret, images = images.toList())
         onChanged(note)
     }
 

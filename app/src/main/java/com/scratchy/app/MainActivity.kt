@@ -13,6 +13,7 @@ import android.text.Editable
 import android.text.TextUtils
 import android.text.TextWatcher
 import android.view.Gravity
+import android.view.MotionEvent
 import android.view.View
 import android.content.pm.PackageManager
 import androidx.dynamicanimation.animation.DynamicAnimation
@@ -35,6 +36,11 @@ class MainActivity : Activity() {
     private var photoDenied = false
     private lateinit var search: EditText
     private lateinit var notes: LinearLayout
+    private lateinit var root: FrameLayout
+    private lateinit var syncLine: TextView
+    /** True when this screen is the vault: only secret notes, behind the password / fingerprint lock. */
+    private val secretMode by lazy { intent.getBooleanExtra(EXTRA_SECRET, false) }
+    private var gate: VaultGate? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         pal = Palette(this)
@@ -43,6 +49,8 @@ class MainActivity : Activity() {
             else android.R.style.Theme_Material_Light_NoActionBar
         )
         super.onCreate(savedInstanceState)
+        if (secretMode) window.setFlags(
+            android.view.WindowManager.LayoutParams.FLAG_SECURE, android.view.WindowManager.LayoutParams.FLAG_SECURE)
         window.statusBarColor = pal.background
         window.navigationBarColor = pal.background
         if (!pal.dark) window.decorView.systemUiVisibility =
@@ -56,7 +64,7 @@ class MainActivity : Activity() {
         // Title row with the overlay switch on the right.
         val titleRow = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
         titleRow.addView(TextView(this).apply {
-            text = "Notes"; textSize = 34f; setTextColor(pal.text)
+            text = if (secretMode) "Secret" else "Notes"; textSize = 34f; setTextColor(pal.text)
             typeface = Typeface.create("sans-serif", Typeface.BOLD)
             letterSpacing = -0.02f
         }, LinearLayout.LayoutParams(0, -2, 1f))
@@ -66,10 +74,14 @@ class MainActivity : Activity() {
             setPadding(dp(16), 0, dp(16), 0)
             pressable(0.95f) { onToggle() }
         }
-        titleRow.addView(toggle, LinearLayout.LayoutParams(-2, dp(36)))
-        titleRow.addView(iconButton(R.drawable.ic_settings, pal.secondary, "Settings") {
-            startActivity(Intent(this, SettingsActivity::class.java))
-        }, LinearLayout.LayoutParams(dp(40), dp(40)).apply { marginStart = dp(4) })
+        if (!secretMode) {
+            titleRow.addView(toggle, LinearLayout.LayoutParams(-2, dp(36)))
+            titleRow.addView(iconButton(R.drawable.ic_settings, pal.secondary, "Settings") {
+                startActivity(Intent(this, SettingsActivity::class.java))
+            }, LinearLayout.LayoutParams(dp(40), dp(40)).apply { marginStart = dp(4) })
+        } else titleRow.addView(iconButton(R.drawable.ic_lock, pal.accent, "Lock now") {
+            Vault.lock(); showGate()
+        }, LinearLayout.LayoutParams(dp(40), dp(40)))
         column.addView(titleRow)
 
         val statusRow = LinearLayout(this).apply {
@@ -80,7 +92,12 @@ class MainActivity : Activity() {
         statusText = TextView(this).apply { textSize = 14f; setTextColor(pal.secondary) }
         statusRow.addView(statusDot, LinearLayout.LayoutParams(dp(8), dp(8)).apply { marginEnd = dp(8) })
         statusRow.addView(statusText)
-        column.addView(statusRow)
+        syncLine = TextView(this).apply {
+            textSize = 13f; setTextColor(pal.secondary); visibility = View.GONE
+            setPadding(dp(2), 0, 0, dp(10))
+            setOnClickListener { startActivity(Intent(this@MainActivity, SettingsActivity::class.java)) }
+        }
+        if (!secretMode) { column.addView(statusRow); column.addView(syncLine) }
 
         permission = TextView(this).apply {
             text = "Allow display over other apps to use the edge bar"
@@ -92,7 +109,7 @@ class MainActivity : Activity() {
                 )
             }
         }
-        column.addView(permission)
+        if (!secretMode) column.addView(permission)
 
         photoAccess = TextView(this).apply {
             text = "Allow photo access to attach screenshots"
@@ -104,7 +121,7 @@ class MainActivity : Activity() {
                 ) else requestPermissions(arrayOf(Screenshots.permission), 2)
             }
         }
-        column.addView(photoAccess)
+        if (!secretMode) column.addView(photoAccess)
 
         // Search field.
         val searchRow = LinearLayout(this).apply {
@@ -131,15 +148,13 @@ class MainActivity : Activity() {
         column.addView(searchRow, LinearLayout.LayoutParams(-1, dp(42)))
 
         notes = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        column.addView(
-            ScrollView(this).apply {
-                isVerticalScrollBarEnabled = false
-                clipToPadding = false
-                setPadding(0, dp(8), 0, dp(96))
-                addView(notes)
-            },
-            LinearLayout.LayoutParams(-1, 0, 1f)
-        )
+        val scroller = PullScrollView(this).apply {
+            isVerticalScrollBarEnabled = false
+            clipToPadding = false
+            setPadding(0, dp(8), 0, dp(96))
+            addView(notes)
+        }
+        column.addView(scroller, LinearLayout.LayoutParams(-1, 0, 1f))
 
         // Floating "new note" button.
         val fab = ImageView(this).apply {
@@ -148,15 +163,20 @@ class MainActivity : Activity() {
             background = roundRect(pal.accent, dp(28).toFloat())
             elevation = dp(6).toFloat()
             contentDescription = "New note"
-            pressable(0.92f) { startActivity(Intent(this@MainActivity, NoteActivity::class.java)) }
+            pressable(0.92f) {
+                startActivity(Intent(this@MainActivity, NoteActivity::class.java).putExtra(EXTRA_SECRET, secretMode))
+            }
         }
-        setContentView(FrameLayout(this).apply {
+        root = FrameLayout(this)
+        setContentView(root.apply {
             setBackgroundColor(pal.background)
             addView(column, FrameLayout.LayoutParams(-1, -1))
             addView(fab, FrameLayout.LayoutParams(dp(56), dp(56), Gravity.BOTTOM or Gravity.END)
                 .apply { setMargins(0, 0, dp(20), dp(24)) })
         })
 
+        if (secretMode) { showGate(); return }
+        installPullUp(scroller)
         val ask = mutableListOf<String>()
         if (Build.VERSION.SDK_INT >= 33) ask += Manifest.permission.POST_NOTIFICATIONS
         if (!Screenshots.hasAccess(this)) ask += Screenshots.permission
@@ -174,8 +194,106 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        Sync.onChanged = { if (gate == null) renderNotes() }
+        Sync.onStatus = { refreshSyncLine() }
+        refreshSyncLine()
+        Sync.schedule(this)
+        Sync.syncIfStale(this)
+        Live.acquire(this, "ui")
+        if (secretMode) {
+            Vault.returned()
+            if (!Vault.isOpen()) showGate() else renderNotes()
+            return
+        }
         refreshStatus()
         renderNotes()
+    }
+
+    /**
+     * Hidden on purpose. A normal pull down at the top just stretches the list, with no hint of a vault.
+     * Only a long, deliberate pull shows the lock in the gap (with a click); letting go then opens the vault.
+     * Pull back before releasing and it disappears again, so it can't be opened by accident.
+     */
+    private fun installPullUp(scroller: PullScrollView) {
+        val hint = ImageView(this).apply {
+            setImageResource(R.drawable.ic_lock); setColorFilter(pal.accent)
+            alpha = 0f
+        }
+        root.addView(hint, FrameLayout.LayoutParams(dp(36), dp(36), Gravity.TOP or Gravity.CENTER_HORIZONTAL))
+
+        val reveal = dp(150).toFloat()        // how far the list has been pulled down when the lock appears
+        val slop = dp(8)
+        var startY = 0f
+        var pull = 0f
+        var pulling = false
+        var armed = false
+
+        /** The lock sits in the gap, just above the list, and travels with it. */
+        fun place() { hint.translationY = scroller.top + notes.translationY - dp(36) - dp(22) }
+        fun arm(on: Boolean) {
+            armed = on
+            if (on) {
+                Haptics.pulse(this, 1f)
+                hint.scaleX = 0.6f; hint.scaleY = 0.6f
+                Motion.spring(hint, DynamicAnimation.ALPHA, 1f, 0.8f, 0.25f)
+                Motion.spring(hint, DynamicAnimation.SCALE_X, 1f, 0.6f, 0.3f)
+                Motion.spring(hint, DynamicAnimation.SCALE_Y, 1f, 0.6f, 0.3f)
+            } else Motion.spring(hint, DynamicAnimation.ALPHA, 0f, 1f, 0.2f)
+        }
+        fun settle() {
+            if (armed) arm(false)
+            Motion.spring(notes, DynamicAnimation.TRANSLATION_Y, 0f, 1f, 0.35f)
+            pulling = false; pull = 0f
+        }
+
+        // Handled before the note cards see the touch, so a pull that starts on a note works too.
+        scroller.pull = handler@{ ev ->
+            when (ev.actionMasked) {
+                MotionEvent.ACTION_DOWN -> { startY = ev.rawY; pulling = false; armed = false; pull = 0f }
+                MotionEvent.ACTION_MOVE -> {
+                    val dy = ev.rawY - startY
+                    // Only a drag that begins at the very top counts, and nothing is consumed until the lock shows.
+                    if (!pulling && dy > slop && !scroller.canScrollVertically(-1)) pulling = true
+                    if (pulling) {
+                        // The list follows the finger with growing resistance, leaving a gap above it.
+                        val raw = (dy - slop).coerceAtLeast(0f)
+                        pull = dp(330) * (1f - Math.exp(-raw / dp(330).toDouble()).toFloat()) * 0.75f
+                        notes.translationY = pull
+                        val now = pull >= reveal
+                        if (now != armed) arm(now)
+                        place()
+                        return@handler true
+                    }
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> if (pulling) {
+                    val open = armed && ev.actionMasked == MotionEvent.ACTION_UP
+                    settle()
+                    if (open) {
+                        startActivity(Intent(this, MainActivity::class.java).putExtra(EXTRA_SECRET, true))
+                        overridePendingTransition(android.R.anim.fade_in, android.R.anim.fade_out)
+                    }
+                    return@handler true
+                }
+            }
+            false
+        }
+    }
+
+
+    private fun refreshSyncLine() {
+        if (secretMode || !::syncLine.isInitialized) return
+        val t = Sync.statusLine(this)
+        syncLine.visibility = if (t.isEmpty()) View.GONE else View.VISIBLE
+        syncLine.text = "Sync: $t"
+        syncLine.setTextColor(if (Sync.state == Sync.State.ATTENTION) pal.accent else pal.secondary)
+    }
+
+    private fun showGate() {
+        gate?.let { root.removeView(it) }
+        notes.removeAllViews()
+        gate = VaultGate(this, pal, onUnlocked = {
+            gate?.let { root.removeView(it) }; gate = null; renderNotes()
+        }, onClose = { finish() }).also { root.addView(it, FrameLayout.LayoutParams(-1, -1)) }
     }
 
     private fun onToggle() {
@@ -208,23 +326,34 @@ class MainActivity : Activity() {
     private fun renderNotes() {
         notes.removeAllViews()
         val query = search.text.toString()
-        val list = NoteStore.search(this, query)
+        val list = NoteStore.search(this, query, secret = secretMode)
         if (list.isEmpty()) {
             notes.addView(TextView(this).apply {
-                text = if (query.isBlank()) "No notes yet. Tap + or use the edge bar." else "No matches."
+                text = if (query.isBlank()) (if (secretMode) "No secret notes yet. Tap +." else "No notes yet. Tap + or use the edge bar.") else "No matches."
                 textSize = 15f; setTextColor(pal.secondary)
                 setPadding(dp(4), dp(16), 0, 0)
             })
             return
         }
-        var lastPinned: Boolean? = null
+        // Two staggered columns: each note goes to the shorter one, so cards of different heights pack neatly.
+        val gap = dp(10)
+        val cols = listOf(LinearLayout(this), LinearLayout(this)).onEach { it.orientation = LinearLayout.VERTICAL }
+        val heights = floatArrayOf(0f, 0f)
         for (n in list) {
-            if (n.pinned != lastPinned && (n.pinned || lastPinned == true)) {
-                notes.addView(sectionLabel(if (n.pinned) "PINNED" else "NOTES"))
-            }
-            lastPinned = n.pinned
-            notes.addView(card(n), LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(10) })
+            val i = if (heights[0] <= heights[1]) 0 else 1
+            heights[i] += estimateHeight(n)
+            cols[i].addView(card(n), LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = gap })
         }
+        notes.addView(LinearLayout(this).apply {
+            addView(cols[0], LinearLayout.LayoutParams(0, -2, 1f).apply { marginEnd = gap / 2 })
+            addView(cols[1], LinearLayout.LayoutParams(0, -2, 1f).apply { marginStart = gap / 2 })
+        }, LinearLayout.LayoutParams(-1, -2))
+    }
+
+    /** Rough card height, only used to balance the two columns. */
+    private fun estimateHeight(n: Note): Float {
+        val lines = minOf(6, (n.preview.length / 18) + n.preview.count { it == '\n' })
+        return 90f + lines * 22f + if (n.images.isNotEmpty()) 130f else 0f
     }
 
     private fun sectionLabel(t: String) = TextView(this).apply {
@@ -233,47 +362,44 @@ class MainActivity : Activity() {
     }
 
     private fun card(n: Note): View {
-        val textCol = LinearLayout(this).apply {
+        val body = n.preview
+        return LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
+            setPadding(dp(16), dp(16), dp(16), dp(14))
+            background = roundRect(pal.surface, dp(24).toFloat())
             addView(TextView(this@MainActivity).apply {
                 text = android.text.SpannableString(n.heading.ifEmpty { "Untitled" })
                     .also { Checklist.style(it, pal, resources.displayMetrics.density) }
                 textSize = 17f; setTextColor(pal.text)
-                typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
-                maxLines = 1; ellipsize = TextUtils.TruncateAt.END
-                bidi()
-            })
-            if (n.preview.isNotEmpty()) addView(TextView(this@MainActivity).apply {
-                text = android.text.SpannableString(n.preview)
-                    .also { Checklist.style(it, pal, resources.displayMetrics.density) }
-                textSize = 15f; setTextColor(pal.secondary)
+                typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
                 maxLines = 2; ellipsize = TextUtils.TruncateAt.END
-                setPadding(0, dp(3), 0, 0)
                 bidi()
             })
+            if (n.images.isNotEmpty()) addView(imagePreview(n.images.first(), n.images.size),
+                LinearLayout.LayoutParams(-1, dp(120)).apply { topMargin = dp(10) })
             addView(TextView(this@MainActivity).apply {
-                text = formatWhen(n.updatedAt); textSize = 13f; setTextColor(pal.secondary)
-                setPadding(0, dp(8), 0, 0)
+                text = if (body.isNotEmpty()) android.text.SpannableString(body)
+                    .also { Checklist.style(it, pal, resources.displayMetrics.density) } else "No text"
+                textSize = 15f; setTextColor(pal.secondary)
+                maxLines = 6; ellipsize = TextUtils.TruncateAt.END
+                setPadding(0, dp(10), 0, 0)
+                setLineSpacing(0f, 1.1f)
+                bidi()
             })
-        }
-        val pin = iconButton(R.drawable.ic_pin, if (n.pinned) pal.accent else pal.hairline, "Pin") {
-            NoteStore.save(this, n.copy(pinned = !n.pinned)); renderNotes()
-        }
-        val topRow = LinearLayout(this).apply {
-            addView(textCol, LinearLayout.LayoutParams(0, -2, 1f))
-            addView(pin, LinearLayout.LayoutParams(dp(40), dp(40)))
-        }
-        return LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(16), dp(12), dp(8), dp(12))
-            background = roundRect(pal.surface, dp(16).toFloat())
-            addView(topRow, LinearLayout.LayoutParams(-1, -2))
-            n.images.firstOrNull()?.let { name -> addView(imagePreview(name, n.images.size),
-                LinearLayout.LayoutParams(-1, dp(170)).apply { topMargin = dp(10); marginEnd = dp(8) }) }
-            tapOrHoldToDelete(dp(16).toFloat(),
+            addView(LinearLayout(this@MainActivity).apply {
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(0, dp(12), 0, 0)
+                addView(TextView(this@MainActivity).apply {
+                    text = formatWhen(n.updatedAt); textSize = 13f; setTextColor(pal.secondary)
+                }, LinearLayout.LayoutParams(0, -2, 1f))
+                if (n.pinned) addView(ImageView(this@MainActivity).apply {
+                    setImageResource(R.drawable.ic_pin); setColorFilter(pal.accent)
+                }, LinearLayout.LayoutParams(dp(16), dp(16)))
+            })
+            tapOrHoldToDelete(dp(24).toFloat(),
                 onTap = {
                     startActivity(Intent(this@MainActivity, NoteActivity::class.java)
-                        .putExtra(NoteActivity.EXTRA_ID, n.id))
+                        .putExtra(NoteActivity.EXTRA_ID, n.id).putExtra(EXTRA_SECRET, n.secret))
                 },
                 onDelete = { deleteWithUndo(n) })
         }
@@ -342,13 +468,17 @@ class MainActivity : Activity() {
 
     override fun onStop() {
         finishDelete()
+        Sync.onChanged = null
+        Sync.onStatus = null
+        Live.release("ui")
+        if (secretMode) Vault.left()
         super.onStop()
     }
 
     /** Large rounded preview of a note's first image, with a "+N" chip when there are more. */
     private fun imagePreview(name: String, count: Int): View {
         val iv = android.widget.ImageView(this).apply {
-            scaleType = android.widget.ImageView.ScaleType.CENTER_CROP
+            scaleType = android.widget.ImageView.ScaleType.MATRIX    // cropped by hand, below, around the middle
             setBackgroundColor(pal.hairline)
             outlineProvider = object : android.view.ViewOutlineProvider() {
                 override fun getOutline(v: View, o: android.graphics.Outline) =
@@ -356,8 +486,18 @@ class MainActivity : Activity() {
             }
             clipToOutline = true
             contentDescription = "Image in note"
+            fun center() {
+                val d = drawable ?: return
+                if (width == 0 || height == 0) return
+                val sc = maxOf(width / d.intrinsicWidth.toFloat(), height / d.intrinsicHeight.toFloat())
+                imageMatrix = android.graphics.Matrix().apply {
+                    setScale(sc, sc)
+                    postTranslate((width - d.intrinsicWidth * sc) / 2f, (height - d.intrinsicHeight * sc) / 2f)
+                }
+            }
+            addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> center() }
             Attachments.thumb(this@MainActivity, name, resources.displayMetrics.widthPixels) {
-                it?.let(::setImageBitmap)
+                it?.let { b -> setImageBitmap(b); center() }
             }
         }
         return FrameLayout(this).apply {
@@ -368,5 +508,30 @@ class MainActivity : Activity() {
                 background = roundRect(0x99000000.toInt(), dp(10).toFloat())
             }, FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM or Gravity.END).apply { setMargins(0, 0, dp(8), dp(8)) })
         }
+    }
+
+    companion object {
+        const val EXTRA_SECRET = "secret"
+    }
+}
+
+/** A ScrollView that offers every touch to [pull] first; once [pull] takes over, children get a cancel. */
+class PullScrollView(ctx: android.content.Context) : ScrollView(ctx) {
+    var pull: ((MotionEvent) -> Boolean)? = null
+    private var taken = false
+
+    override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+        val h = pull ?: return super.dispatchTouchEvent(ev)
+        if (ev.actionMasked == MotionEvent.ACTION_DOWN) taken = false
+        if (h(ev)) {
+            if (!taken) {
+                taken = true
+                val c = MotionEvent.obtain(ev).apply { action = MotionEvent.ACTION_CANCEL }
+                super.dispatchTouchEvent(c)          // the card under the finger lets go
+                c.recycle()
+            }
+            return true
+        }
+        return super.dispatchTouchEvent(ev)
     }
 }
