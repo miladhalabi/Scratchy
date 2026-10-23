@@ -31,8 +31,8 @@ export function buildAuthUrl(c: OAuthClient, redirectUri: string, challenge: str
   return `${AUTH}?${q}`;
 }
 
-async function tokenCall(body: Record<string, string>): Promise<any> {
-  const r = await fetch(TOKEN, {
+async function tokenCall(body: Record<string, string>, fetchFn: typeof fetch): Promise<any> {
+  const r = await fetchFn(TOKEN, {
     method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams(body),
   });
   const o: any = await r.json().catch(() => ({}));
@@ -40,17 +40,21 @@ async function tokenCall(body: Record<string, string>): Promise<any> {
   return o;
 }
 
-export async function exchangeCode(c: OAuthClient, code: string, verifier: string, redirectUri: string, now = Date.now()): Promise<Tokens> {
+export async function exchangeCode(
+  c: OAuthClient, code: string, verifier: string, redirectUri: string, now = Date.now(), fetchFn: typeof fetch = fetch,
+): Promise<Tokens> {
   const o = await tokenCall({
     client_id: c.clientId, client_secret: c.clientSecret, code, code_verifier: verifier,
     redirect_uri: redirectUri, grant_type: "authorization_code",
-  });
+  }, fetchFn);
   return { accessToken: o.access_token, refreshToken: o.refresh_token, expiresAt: now + (o.expires_in - 60) * 1000 };
 }
 
-export async function refreshAccessToken(c: OAuthClient, refreshToken: string, now = Date.now()): Promise<Tokens> {
+export async function refreshAccessToken(
+  c: OAuthClient, refreshToken: string, now = Date.now(), fetchFn: typeof fetch = fetch,
+): Promise<Tokens> {
   const o = await tokenCall({
     client_id: c.clientId, client_secret: c.clientSecret, refresh_token: refreshToken, grant_type: "refresh_token",
-  });
+  }, fetchFn);
   return { accessToken: o.access_token, refreshToken, expiresAt: now + (o.expires_in - 60) * 1000 };
 }

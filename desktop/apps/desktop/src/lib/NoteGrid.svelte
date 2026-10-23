@@ -3,7 +3,9 @@
   import { formatWhen, heading, preview } from "./format";
   import type { Note } from "@scratchy/core";
 
-  let { onOpen, onNew }: { onOpen: (n: Note) => void; onNew: () => void } = $props();
+  import { syncStatus } from "./sync";
+
+  let { onOpen, onNew, onSync }: { onOpen: (n: Note) => void; onNew: () => void; onSync: () => void } = $props();
   let query = $state("");
   let search: HTMLInputElement;
 
@@ -24,6 +26,10 @@
 <main>
   <header>
     <h1>Notes</h1>
+    <button class="sync" onclick={onSync} title={$syncStatus.text}>
+      <span class="dot {$syncStatus.state}"></span>
+      <span class="label">{$syncStatus.state === "off" ? "Sync" : $syncStatus.text}</span>
+    </button>
   </header>
   <label class="search">
     <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M15.5 14h-.79l-.28-.27A6.47 6.47 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14"/></svg>
@@ -56,7 +62,16 @@
 
 <style>
   main { height: 100%; display: flex; flex-direction: column; padding: 28px 28px 0; max-width: 1400px; margin: 0 auto; }
-  h1 { margin: 0 0 18px 4px; font-size: 40px; letter-spacing: -0.02em; }
+  header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 18px; }
+  h1 { margin: 0 0 0 4px; font-size: 40px; letter-spacing: -0.02em; }
+  .sync { display: flex; align-items: center; gap: 9px; height: 38px; padding: 0 16px; border-radius: 19px; background: var(--surface); color: var(--secondary); font-size: 14px; max-width: 55%; }
+  .sync:hover { color: var(--text); }
+  .sync .label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--secondary); flex: none; }
+  .dot.idle { background: var(--success); }
+  .dot.syncing { background: var(--accent); animation: pulse 1s ease-in-out infinite; }
+  .dot.offline, .dot.attention { background: var(--danger); }
+  @keyframes pulse { 50% { opacity: .35; } }
   .search {
     display: flex; align-items: center; gap: 10px; padding: 0 16px; height: 46px;
     background: var(--surface); border-radius: 16px; color: var(--secondary); margin-bottom: 14px;

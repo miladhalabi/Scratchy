@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { connect, deriveKey, WrongPassword } from "../src";
+import { connect, deriveKey, relayChanges, WrongPassword } from "../src";
 import { Device, FakeDrive } from "./helpers";
 
 let drive: FakeDrive, key: Uint8Array, room: Device[], A: Device, B: Device;
@@ -206,5 +206,29 @@ describe("safety", () => {
     await B.sync(); await A.sync();
     expect(A.store.get("n")!.body).toBe("A\nb\nC");
     expect(B.store.get("n")!.body).toBe("A\nb\nC");
+  });
+});
+
+describe("relayChanges", () => {
+  it("sends edits straight away, before any Drive sync, and B applies them", async () => {
+    A.store.save({ id: "n", title: "T", body: "one" }, 1000);
+    await A.sync(); await B.sync();
+    B.inbox.length = 0;
+    A.store.save({ id: "n", body: "two" }, 2000);
+    const sent = await A.relayNow(["n"]);                 // nothing has been uploaded to Drive yet
+    expect(sent).toBe(1);
+    const [r] = await B.receive();
+    expect(r.applied).toBe(true);
+    expect(B.store.get("n")!.body).toBe("two");
+  });
+
+  it("sends deletions too, and ignores ids that no longer exist anywhere", async () => {
+    A.store.save({ id: "n", body: "x" }, 1000);
+    await A.sync(); await B.sync();
+    B.inbox.length = 0;
+    A.store.remove("n", 2000);
+    expect(await A.relayNow(["n", "ghost"])).toBe(1);
+    await B.receive();
+    expect(B.store.get("n")).toBeUndefined();
   });
 });

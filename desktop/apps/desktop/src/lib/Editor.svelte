@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onDestroy, onMount } from "svelte";
-  import { local } from "./state";
+  import { local, notes } from "./state";
   import type { Note } from "@scratchy/core";
 
   let { note, onBack, onDelete }: { note: Note; onBack: () => void; onDelete: (n: Note) => void } = $props();
@@ -30,6 +30,15 @@
 
   onMount(() => { (note.title || note.body ? bodyEl : titleEl).focus(); });
   onDestroy(() => { void commit(); });
+
+  // Another device (or a sync) changed this note: show it, unless there are unsaved edits here.
+  $effect(() => {
+    const stored = $notes.find((n) => n.id === current.id);
+    if (!stored || stored.rev <= current.rev) return;
+    if (title !== current.title || body !== current.body || pinned !== current.pinned) return;   // unsaved typing wins
+    current = stored;
+    title = stored.title; body = stored.body; pinned = stored.pinned;
+  });
 
   async function back() { await commit(); onBack(); }
   async function del() { await commit(); onDelete(current); }

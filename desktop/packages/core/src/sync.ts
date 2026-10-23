@@ -238,6 +238,24 @@ export async function applyLive(d: SyncDeps, dataB64: string): Promise<LiveResul
   return { applied, followUp };
 }
 
+/**
+ * Sends the current version of each note (or its deletion) straight to the other devices. Failures don't
+ * matter: Drive follows. Port of relayNow in Sync.kt.
+ */
+export async function relayChanges(d: SyncDeps, ids: string[]): Promise<number> {
+  const notes = new Map((await d.store.notes()).map((n) => [n.id, n]));
+  const tombs = await d.store.tombstones();
+  const out: string[] = [];
+  for (const id of ids) {
+    const side: Side | null = notes.has(id) ? noteSide(notes.get(id)!) : id in tombs ? { note: null, deletedAt: tombs[id] } : null;
+    if (!side) continue;
+    const sealed = await seal(d.key, json(payloadJson(side, id)));
+    if (sealed.length <= RELAY_MAX) out.push(toBase64(sealed));          // big notes go through Drive instead
+  }
+  if (out.length) d.relay?.relay(out);
+  return out.length;
+}
+
 /** The relay room for this account (a hash of the key). */
 export const roomId = (key: Uint8Array) => liveId(key);
 export { noteFromJson };

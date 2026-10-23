@@ -17,6 +17,10 @@ export class LocalStore implements Store {
   /** Called after any change to the notes (not for sync bookkeeping). */
   onChange(fn: () => void) { this.listeners.add(fn); return () => this.listeners.delete(fn); }
   private fire() { this.listeners.forEach((f) => f()); }
+  private editListeners = new Set<(id: string) => void>();
+  /** Called when the USER changes a note (not for changes that arrive from sync), so sync can start. */
+  onEdit(fn: (id: string) => void) { this.editListeners.add(fn); return () => this.editListeners.delete(fn); }
+  private edited(id: string) { this.editListeners.forEach((f) => f(id)); }
 
   async load() {
     const n = await files.readText("notes.json");
@@ -59,6 +63,7 @@ export class LocalStore implements Store {
     delete this.tombs[saved.id];
     await this.persistNotes();
     this.fire();
+    this.edited(saved.id);
     return saved;
   }
 
@@ -67,6 +72,7 @@ export class LocalStore implements Store {
     this.tombs[id] = Date.now();
     await this.persistNotes();
     this.fire();
+    this.edited(id);
   }
 
   /** Undo of a delete: puts the note back and forgets the deletion marker. */
@@ -75,6 +81,7 @@ export class LocalStore implements Store {
     delete this.tombs[note.id];
     await this.persistNotes();
     this.fire();
+    this.edited(note.id);
   }
 
   // ---- the sync engine's view ----

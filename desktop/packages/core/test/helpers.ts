@@ -1,4 +1,4 @@
-import { type DriveApi, type Note, type Relay, type RemoteFile, type StateEntry, type Store, sameContent, syncNow, applyLive } from "../src";
+import { relayChanges, type DriveApi, type Note, type Relay, type RemoteFile, type StateEntry, type Store, sameContent, syncNow, applyLive } from "../src";
 
 /** An in-memory stand-in for Drive's app-data folder. */
 export class FakeDrive implements DriveApi {
@@ -87,6 +87,7 @@ export class Device {
     return { drive: this.drive, store: this.store, key: this.key, relay: this.relay, newId: () => `${this.name}-copy-${n++}`, ...extra };
   }
   sync(now?: () => number) { return syncNow(this.deps(now ? { now } : {})); }
+  relayNow(ids: string[]) { return relayChanges(this.deps(), ids); }
   async receive() {
     const out = [];
     for (const p of this.inbox.splice(0)) out.push(await applyLive(this.deps(), p));

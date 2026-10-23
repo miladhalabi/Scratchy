@@ -1,23 +1,27 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { init, ready, applyTheme, local, createNote } from "./lib/state";
+  import { startSync, noteEdited, onFocus, syncNotice } from "./lib/sync";
+  import SyncPanel from "./lib/SyncPanel.svelte";
   import NoteGrid from "./lib/NoteGrid.svelte";
   import Editor from "./lib/Editor.svelte";
   import type { Note } from "@scratchy/core";
 
   let editing: Note | null = $state(null);
   let deleted: Note | null = $state(null);
+  let showSync = $state(false);
   let undoTimer: ReturnType<typeof setTimeout> | undefined;
 
   onMount(() => {
     applyTheme();
     matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => applyTheme());
-    init();
+    init().then(() => { local.onEdit(noteEdited); void startSync(); });
+    addEventListener("focus", onFocus);
     const key = (e: KeyboardEvent) => {
       if (e.ctrlKey && e.key.toLowerCase() === "n") { e.preventDefault(); editing = createNote(); }
     };
     addEventListener("keydown", key);
-    return () => removeEventListener("keydown", key);
+    return () => { removeEventListener("keydown", key); removeEventListener("focus", onFocus); };
   });
 
   async function remove(n: Note) {
@@ -37,9 +41,12 @@
   {#if editing}
     <Editor note={editing} onBack={() => (editing = null)} onDelete={remove} />
   {:else}
-    <NoteGrid onOpen={(n) => (editing = n)} onNew={() => (editing = createNote())} />
+    <NoteGrid onOpen={(n) => (editing = n)} onNew={() => (editing = createNote())} onSync={() => (showSync = true)} />
   {/if}
-  {#if deleted}
+  {#if showSync}<SyncPanel onClose={() => (showSync = false)} />{/if}
+  {#if $syncNotice}
+    <div class="undo" role="status"><span>{$syncNotice}</span><button onclick={() => syncNotice.set("")}>OK</button></div>
+  {:else if deleted}
     <div class="undo" role="status">
       <span>Note deleted</span>
       <button onclick={undo}>Undo</button>
