@@ -10,4 +10,6 @@ Works, with these lessons:
 - `gtk-layer-shell` crate needs the `v0_6` feature for `set_keyboard_mode`.
 - `libjxl.so.0.12` was missing on the test machine (partial system upgrade); a private copy is loaded via LD_LIBRARY_PATH.
 
-Not yet verified: typing in the card (keyboard on demand), dragging by margins, and showing above a fullscreen video.
+Verified by the user on Hyprland: clicking the bar toggles the card (needs `withGlobalTauri: true`), and typing in the card works (keyboard mode on demand).
+
+Not yet verified: dragging by margins and showing above a fullscreen video.
