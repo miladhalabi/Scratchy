@@ -194,6 +194,7 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        if (Palette(this).signature != pal.signature) { recreate(); return }   // the look changed (color setting, wallpaper)
         Sync.onChanged = { if (gate == null) renderNotes() }
         Sync.onStatus = { refreshSyncLine() }
         refreshSyncLine()
@@ -312,13 +313,13 @@ class MainActivity : Activity() {
         permission.visibility = if (canDraw) View.GONE else View.VISIBLE
         photoAccess.visibility = if (Screenshots.hasAccess(this)) View.GONE else View.VISIBLE
         toggle.text = if (on) "Edge bar on" else "Edge bar off"
-        toggle.setTextColor(if (on) pal.text else Color.WHITE)
+        toggle.setTextColor(if (on) pal.text else pal.onAccent)
         toggle.background = roundRect(
-            if (on) (if (pal.dark) Color.parseColor("#2C2C2E") else Color.parseColor("#E5E5EA")) else pal.accent,
+            if (on) pal.track else pal.accent,
             dp(18).toFloat()
         )
         statusDot.background = roundRect(
-            if (on) Color.parseColor("#34C759") else pal.secondary, dp(4).toFloat()
+            if (on) pal.success else pal.secondary, dp(4).toFloat()
         )
         statusText.text = if (on) "Tap the bar on the screen edge from any app" else "Turn on to write notes over other apps"
     }
@@ -433,13 +434,13 @@ class MainActivity : Activity() {
         val bar = LinearLayout(this).apply {
             gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(18), 0, dp(6), 0)
-            background = roundRect(if (pal.dark) Color.parseColor("#3A3A3C") else Color.parseColor("#2C2C2E"), dp(24).toFloat())
+            background = roundRect(pal.text, dp(24).toFloat())          // inverse of the screen: dark bar in light mode and the reverse
             elevation = dp(8).toFloat()
             addView(TextView(this@MainActivity).apply {
-                text = "Note deleted"; textSize = 15f; setTextColor(Color.WHITE)
+                text = "Note deleted"; textSize = 15f; setTextColor(pal.background)
             }, LinearLayout.LayoutParams(0, -2, 1f))
             addView(TextView(this@MainActivity).apply {
-                text = "Undo"; textSize = 15f; setTextColor(pal.accent)
+                text = "Undo"; textSize = 15f; setTextColor(pal.accentInverse)
                 typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
                 setPadding(dp(14), dp(12), dp(14), dp(12))
                 pressable(0.95f) {

@@ -43,7 +43,7 @@ object Appearance {
     fun card(ctx: Context, pal: Palette): Drawable {
         val opacity = opacity(ctx)
         val a = (255 * opacity / 100f).toInt()
-        val base = if (isGlass(ctx)) (if (pal.dark) 0x1C1C1E else 0xFFFFFF) else (pal.floating and 0xFFFFFF)
+        val base = if (isGlass(ctx)) (pal.surface and 0xFFFFFF) else (pal.floating and 0xFFFFFF)
         val fill = (a shl 24) or (base and 0xFFFFFF)
         return if (isGlass(ctx)) GlassDrawable(fill, cardRadius(ctx), ctx.resources.displayMetrics.density, pal.dark)
         else roundRect(fill, cardRadius(ctx), pal.hairline, 1)

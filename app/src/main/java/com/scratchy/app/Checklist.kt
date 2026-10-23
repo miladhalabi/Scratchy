@@ -13,6 +13,7 @@ import android.text.style.StrikethroughSpan
 class CheckSpan(
     private val checked: Boolean,
     private val accent: Int,
+    private val onAccent: Int,
     private val outline: Int,
     private val density: Float,
 ) : ReplacementSpan() {
@@ -37,7 +38,7 @@ class CheckSpan(
             paint.color = accent
             canvas.drawRoundRect(box, r, r, paint)
             paint.style = Paint.Style.STROKE
-            paint.color = 0xFFFFFFFF.toInt()
+            paint.color = onAccent
             paint.strokeWidth = s * 0.14f
             paint.strokeCap = Paint.Cap.ROUND
             paint.strokeJoin = Paint.Join.ROUND
@@ -75,7 +76,7 @@ object Checklist {
             val nl = s.indexOf('\n', i).let { if (it < 0) s.length else it }
             if (nl > i && (s[i] == BOX_OFF || s[i] == BOX_ON)) {
                 val on = s[i] == BOX_ON
-                s.setSpan(CheckSpan(on, pal.accent, pal.secondary, density), i, i + 1, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
+                s.setSpan(CheckSpan(on, pal.accent, pal.onAccent, pal.secondary, density), i, i + 1, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
                 if (on && nl > i + 2) {
                     s.setSpan(DoneStrike(), i + 2, nl, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
                     s.setSpan(DoneColor(pal.secondary), i + 2, nl, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)

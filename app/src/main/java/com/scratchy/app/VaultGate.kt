@@ -55,7 +55,7 @@ class VaultGate(
     private fun button(text: String, filled: Boolean, onTap: () -> Unit) = TextView(a).apply {
         this.text = text; textSize = 16f; gravity = Gravity.CENTER
         typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
-        setTextColor(if (filled) 0xFFFFFFFF.toInt() else pal.accent)
+        setTextColor(if (filled) pal.onAccent else pal.accent)
         background = if (filled) roundRect(pal.accent, a.dp(14).toFloat()) else null
         pressable(0.97f) { onTap() }
     }
@@ -70,7 +70,7 @@ class VaultGate(
         column.addView(label(sub, 15f, pal.secondary), LinearLayout.LayoutParams(-1, -2).apply { topMargin = a.dp(8); bottomMargin = a.dp(24) })
     }
 
-    private fun error(msg: String) = label(msg, 14f, 0xFFFF453A.toInt())
+    private fun error(msg: String) = label(msg, 14f, pal.danger)
 
     // ---- first time ----
 

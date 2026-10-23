@@ -18,10 +18,11 @@ class NoteActivity : Activity() {
     private lateinit var editor: NoteEditor
     private lateinit var pinButton: ImageView
     private var it0: View? = null
+    private lateinit var pal: Palette
     private var refreshFromStore: (() -> Unit)? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        val pal = Palette(this)
+        pal = Palette(this)
         setTheme(
             if (pal.dark) android.R.style.Theme_Material_NoActionBar
             else android.R.style.Theme_Material_Light_NoActionBar
@@ -145,6 +146,7 @@ class NoteActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        if (Palette(this).signature != pal.signature) { recreate(); return }   // the look changed (color setting, wallpaper)
         Sync.onChangedNote = refreshFromStore
         Live.acquire(this, "note")            // keep the instant connection open while a note is on screen
         if (::editor.isInitialized && editor.note.secret) Vault.returned()

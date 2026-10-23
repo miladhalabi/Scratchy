@@ -87,6 +87,10 @@ class OverlayService : Service() {
     private val sideListener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
         if (key == "right" && !panelOpen) applySideFromPrefs()
         if (key == "bar_gap" && ::bar.isInitialized) bar.gapPx = barGapPx()
+        if (key == "theme_color" && ::bar.isInitialized) {      // new color chosen in Settings
+            pal = Palette(this)
+            if (pendingShot == null) bar.setTint(pal.accent)
+        }
     }
     private val shotObserver = object : ContentObserver(Handler(Looper.getMainLooper())) {
         override fun onChange(selfChange: Boolean) {
@@ -439,6 +443,8 @@ class OverlayService : Service() {
 
     private fun expand() {
         if (panel != null) return
+        pal = Palette(this)                     // pick up wallpaper / dark-mode changes since the last open
+        if (pendingShot == null) bar.setTint(pal.accent)
         panelOpen = true
         main.removeCallbacks(tuckRunnable)
 
@@ -619,13 +625,13 @@ class OverlayService : Service() {
                 addView(TextView(ui).apply {
                     text = title
                     setTextSize(TypedValue.COMPLEX_UNIT_SP, 17f)
-                    setTextColor(if (filled) 0xFFFFFFFF.toInt() else pal.text)
+                    setTextColor(if (filled) pal.onAccent else pal.text)
                     typeface = android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL)
                 })
                 if (sub != null) addView(TextView(ui).apply {
                     text = sub
                     setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
-                    setTextColor(if (filled) 0xCCFFFFFF.toInt() else pal.secondary)
+                    setTextColor(if (filled) (pal.onAccent and 0xFFFFFF) or 0xCC000000.toInt() else pal.secondary)
                     maxLines = 1; ellipsize = TextUtils.TruncateAt.END
                     bidi()
                 })

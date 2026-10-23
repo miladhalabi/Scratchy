@@ -15,7 +15,7 @@ import android.content.res.ColorStateList
 
 /** Building blocks so every Settings row looks and behaves the same. */
 
-fun trackColor(pal: Palette) = if (pal.dark) 0xFF2C2C2E.toInt() else 0xFFE5E5EA.toInt()
+fun trackColor(pal: Palette) = pal.track
 
 private fun medium() = Typeface.create("sans-serif-medium", Typeface.NORMAL)
 
@@ -94,7 +94,7 @@ class SegmentedControl(
         paintText()
     }
 
-    private fun paintText() = cells.forEachIndexed { i, tv -> tv.setTextColor(if (i == index) Color.WHITE else pal.text) }
+    private fun paintText() = cells.forEachIndexed { i, tv -> tv.setTextColor(if (i == index) pal.onAccent else pal.text) }
 
     // The highlight is as wide as one option; its width must be set before children are measured.
     override fun onMeasure(widthSpec: Int, heightSpec: Int) {
@@ -154,7 +154,7 @@ class SliderRow(
         val barH = ctx.dp(34)
         val trackH = ctx.dp(4)
         val track = android.graphics.drawable.GradientDrawable().apply {
-            setColor(if (pal.dark) 0xFF48484A.toInt() else 0xFFC7C7CC.toInt()); cornerRadius = trackH / 2f
+            setColor(pal.hairline); cornerRadius = trackH / 2f
         }
         val fill = android.graphics.drawable.ClipDrawable(
             android.graphics.drawable.GradientDrawable().apply { setColor(pal.accent); cornerRadius = trackH / 2f },

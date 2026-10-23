@@ -335,7 +335,7 @@ class SettingsActivity : Activity() {
         syncNewPw = TextView(this)
         fun syncButton(t: TextView, filled: Boolean, onTap: () -> Unit) = t.apply {
             textSize = 16f; gravity = Gravity.CENTER
-            setTextColor(if (filled) Color.WHITE else pal.accent)
+            setTextColor(if (filled) pal.onAccent else pal.accent)
             typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
             background = if (filled) roundRect(pal.accent, dp(14).toFloat()) else null
             pressable(0.97f) { onTap() }
@@ -432,7 +432,7 @@ class SettingsActivity : Activity() {
                 }
                 addView(TextView(context).apply {
                     text = "Test connection"; textSize = 16f; gravity = Gravity.CENTER
-                    setTextColor(Color.WHITE)
+                    setTextColor(pal.onAccent)
                     typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
                     background = roundRect(pal.accent, dp(14).toFloat())
                     pressable(0.97f) {
