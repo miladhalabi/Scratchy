@@ -7,7 +7,8 @@ use std::{
     sync::Mutex,
     time::{Duration, Instant},
 };
-use tauri::{AppHandle, Manager, State};
+mod overlay;
+use tauri::{AppHandle, Manager, State, WindowEvent};
 
 /// Only plain file names: no folders, no "..", nothing hidden.
 fn safe(name: &str) -> Result<(), String> {
@@ -205,14 +206,53 @@ fn data_path(app: AppHandle) -> Result<String, String> {
     Ok(dir(&app, None)?.to_string_lossy().into_owned())
 }
 
+#[tauri::command]
+fn toggle_card(app: AppHandle) { overlay::toggle_card(&app) }
+#[tauri::command]
+fn show_card(app: AppHandle) { overlay::show_card(&app) }
+#[tauri::command]
+fn hide_card(app: AppHandle) { overlay::hide_card(&app) }
+#[tauri::command]
+fn move_card(app: AppHandle, x: i32, y: i32) { overlay::move_card(&app, x, y) }
+#[tauri::command]
+fn resize_card(app: AppHandle, w: i32, h: i32) { overlay::resize_card(&app, w, h) }
+#[tauri::command]
+fn set_pinned(app: AppHandle, pinned: bool) { overlay::set_pinned(&app, pinned) }
+#[tauri::command]
+fn overlay_prefs(app: AppHandle) -> overlay::Prefs { overlay::prefs(&app) }
+
+#[tauri::command]
+fn show_main(app: AppHandle) {
+    if let Some(w) = app.get_webview_window("main") { let _ = w.show(); let _ = w.unminimize(); let _ = w.set_focus(); }
+}
+
 fn main() {
     tauri::Builder::default()
+        // A second launch (for example from a keybinding) talks to the running app instead of starting another.
+        .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+            if argv.iter().any(|a| a == "--toggle") { overlay::toggle_card(app) }
+            else if argv.iter().any(|a| a == "--card") { overlay::show_card(app) }
+            else if let Some(w) = app.get_webview_window("main") { let _ = w.show(); let _ = w.unminimize(); let _ = w.set_focus(); }
+        }))
         .plugin(tauri_plugin_http::init())
         .manage(Oauth(Mutex::new(None)))
         .invoke_handler(tauri::generate_handler![
             read_text, write_text, remove_text, read_attachment, write_attachment, has_attachment, data_path,
-            google_client, oauth_start, oauth_wait, open_url, secret_get, secret_set, secret_delete
+            google_client, oauth_start, oauth_wait, open_url, secret_get, secret_set, secret_delete,
+            toggle_card, show_card, hide_card, move_card, resize_card, set_pinned, overlay_prefs, show_main
         ])
+        .setup(|app| {
+            let h = app.handle().clone();
+            app.manage(overlay::State(Mutex::new(overlay::load_prefs(&h))));
+            overlay::setup(&h);
+            Ok(())
+        })
+        // Closing the main window only hides it: it also runs notes, sync and the vault for the card.
+        .on_window_event(|w, e| {
+            if let WindowEvent::CloseRequested { api, .. } = e {
+                if w.label() == "main" { api.prevent_close(); let _ = w.hide(); }
+            }
+        })
         .run(tauri::generate_context!())
         .expect("error while running Scratchy");
 }

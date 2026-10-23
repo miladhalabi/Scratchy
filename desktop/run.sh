@@ -8,4 +8,4 @@ cd "$(dirname "$0")"
 [ -f .env.local ] && { set -a; . ./.env.local; set +a; }
 pnpm --filter @scratchy/desktop build
 cargo build -p scratchy-desktop
-LD_LIBRARY_PATH="$(pwd)/.libjxl12:$LD_LIBRARY_PATH" WEBKIT_DISABLE_DMABUF_RENDERER=1 exec ./target/debug/scratchy-desktop "$@"
+LD_LIBRARY_PATH="$(pwd)/.libjxl12:$LD_LIBRARY_PATH" LD_PRELOAD=/usr/lib/libgtk-layer-shell.so WEBKIT_DISABLE_DMABUF_RENDERER=1 exec ./target/debug/scratchy-desktop "$@"
