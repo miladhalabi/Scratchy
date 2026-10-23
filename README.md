@@ -127,6 +127,33 @@ Display over other apps, foreground service, notifications, photo access (screen
 - Real-time updates need the app open or the edge bar on; otherwise devices catch up on the next open or background run.
 - Phone makers' battery managers (Xiaomi, Honor) can limit the edge bar and the background sync.
 
+## To do: UI polish
+
+The color system (follows the wallpaper, with a fixed-color fallback) and the new Settings menu are done. What is left, roughly in the order I would do it:
+
+**First**
+- [ ] **Screenshot-waiting bar color.** The bar turns green when a screenshot is waiting, but on a teal wallpaper the normal bar is also teal-green. Give the waiting state a clearly different color or cue.
+- [ ] **Dialogs.** Password and connect dialogs use Android's default style. Make them rounded and palette-colored.
+- [ ] **Notes list header.** Three stacked status lines above the search bar (edge bar, "Sync: Synced 16:53", permission prompts). Merge into one quiet line, or show sync state as a small icon next to the gear.
+- [ ] **Edge bar icon** in the Settings menu looks like a slash. Replace it with a proper bar/edge icon.
+- [ ] **Light mode.** Check every screen with the new wallpaper colors.
+- [ ] **Tablet.** The notes grid uses two columns everywhere; use three or four on wide screens, and narrow the Settings pages.
+
+**Then**
+- [ ] **Floating card** with the new colors: header icons, bottom Close strip, continue row, screenshot chooser, AI title chips, glass style on a teal palette.
+- [ ] **Touch targets.** Card header icons are 36dp wide; Android recommends 48dp.
+- [ ] **Note editor.** The top row of six grey icons is crowded.
+- [ ] **Notes grid.** Make the pinned marker easier to see; "No text" shows on notes that only have a title; "(conflict)" notes look like ordinary notes.
+- [ ] **Vault.** Lock screen and the lock that appears on the pull-down.
+- [ ] **Settings pages not reviewed yet:** Edge bar, Card, Screenshots, Sync, Secret notes, AI titles.
+- [ ] **Floating "+" button.** Check contrast on teal.
+- [ ] **Empty states, undo bar and toasts:** wording and spacing.
+
+**Other open items**
+- [ ] Publish the Google OAuth app (Cloud Console, OAuth consent screen, Publish app) so the Drive permission stops expiring every 7 days.
+- [ ] Try the vault password change on two real devices.
+- [ ] Look at the secret-notes images: they are hidden in the app but not encrypted on disk.
+
 ## Project notes
 
 `PLAN.md` is the original design plan. The app has since moved from a notification-based idea to the edge bar and card described above.
