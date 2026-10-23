@@ -12,7 +12,7 @@
  const kind = new URLSearchParams(location.search).get('k') || 'card';
  if (kind === 'bar') {
    document.body.innerHTML = '<div class="bar" id="b"><div class="pill"></div></div>';
-   document.getElementById('b').onclick = () => window.__TAURI__.core.invoke('toggle_card');
+   document.getElementById('b').onclick = () => { try { window.__TAURI__.core.invoke('toggle_card'); } catch (e) { document.body.style.background = '#f00'; } };
  } else {
    document.body.innerHTML = '<div class="card"><b>spike card (layer-shell)</b><span id="fps"></span><textarea placeholder="type here..."></textarea></div>';
    let n=0,t=performance.now(); (function f(){ n++; const now=performance.now(); if(now-t>1000){document.getElementById('fps').textContent=n+' fps (rAF)'; n=0;t=now;} requestAnimationFrame(f)})();

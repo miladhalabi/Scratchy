@@ -31,6 +31,7 @@ fn layer_window(app: &AppHandle, label: &str, url: &str, w: f64, h: f64, left_ma
 
 #[tauri::command]
 fn toggle_card(app: AppHandle) {
+    eprintln!("[spike] toggle_card called");
     if let Some(c) = app.get_webview_window("card") {
         let _ = if c.is_visible().unwrap_or(false) { c.hide() } else { c.show() };
     }

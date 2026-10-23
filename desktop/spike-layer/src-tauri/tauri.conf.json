@@ -3,7 +3,17 @@
   "productName": "spike-layer",
   "version": "0.0.1",
   "identifier": "com.scratchy.spike",
-  "build": { "frontendDist": "../ui" },
-  "app": { "windows": [], "security": { "csp": null } },
-  "bundle": { "active": false }
+  "build": {
+    "frontendDist": "../ui"
+  },
+  "app": {
+    "windows": [],
+    "security": {
+      "csp": null
+    },
+    "withGlobalTauri": true
+  },
+  "bundle": {
+    "active": false
+  }
 }
