@@ -30,6 +30,9 @@ fn layer_window(app: &AppHandle, label: &str, url: &str, w: f64, h: f64, left_ma
 }
 
 #[tauri::command]
+fn log(msg: String) { eprintln!("[spike] {msg}"); }
+
+#[tauri::command]
 fn toggle_card(app: AppHandle) {
     eprintln!("[spike] toggle_card called");
     if let Some(c) = app.get_webview_window("card") {
@@ -39,10 +42,10 @@ fn toggle_card(app: AppHandle) {
 
 fn main() {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![toggle_card])
+        .invoke_handler(tauri::generate_handler![toggle_card, log])
         .setup(|app| {
             let h = app.handle().clone();
-            layer_window(&h, "bar", "index.html?k=bar", 20.0, 100.0, 0, 400, false);
+            layer_window(&h, "bar", "index.html?k=bar", 24.0, 100.0, 0, 400, false);
             layer_window(&h, "card", "index.html?k=card", 360.0, 300.0, 40, 300, true);
             Ok(())
         })

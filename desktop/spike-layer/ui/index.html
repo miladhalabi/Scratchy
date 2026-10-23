@@ -4,7 +4,7 @@
  .card{box-sizing:border-box;height:100%;margin:0;background:rgba(36,40,40,.92);border-radius:22px;padding:14px;display:flex;flex-direction:column;gap:10px;border:1px solid #ffffff22}
  textarea{flex:1;background:transparent;border:0;outline:0;color:#eee;font:16px system-ui;resize:none}
  .bar{width:100%;height:100%;display:flex;align-items:center;justify-content:flex-start}
- .pill{width:6px;height:80px;border-radius:3px;background:#7ad6c4}
+ .pill{width:10px;height:80px;border-radius:5px;background:#7ad6c4}
  #fps{font:12px monospace;opacity:.7}
 </style>
 <body></body>
@@ -12,9 +12,13 @@
  const kind = new URLSearchParams(location.search).get('k') || 'card';
  if (kind === 'bar') {
    document.body.innerHTML = '<div class="bar" id="b"><div class="pill"></div></div>';
-   document.getElementById('b').onclick = () => { try { window.__TAURI__.core.invoke('toggle_card'); } catch (e) { document.body.style.background = '#f00'; } };
+   const b = document.getElementById('b'), pill = b.firstChild;
+   const call = (cmd, args) => { try { return window.__TAURI__.core.invoke(cmd, args); } catch (e) { pill.style.background = '#f00'; } };
+   b.onpointerdown = () => { pill.style.background = '#ff9f0a'; call('toggle_card'); };
+   b.onpointerup = () => { pill.style.background = '#7ad6c4'; };
  } else {
-   document.body.innerHTML = '<div class="card"><b>spike card (layer-shell)</b><span id="fps"></span><textarea placeholder="type here..."></textarea></div>';
+   document.body.innerHTML = '<div class="card"><b>spike card (layer-shell)</b><span id="fps"></span><textarea id="t" placeholder="type here..."></textarea></div>';
+   document.getElementById('t').oninput = e => { try { window.__TAURI__.core.invoke('log', { msg: 'typed: ' + e.target.value.length + ' chars' }); } catch (_) {} };
    let n=0,t=performance.now(); (function f(){ n++; const now=performance.now(); if(now-t>1000){document.getElementById('fps').textContent=n+' fps (rAF)'; n=0;t=now;} requestAnimationFrame(f)})();
  }
 </script>
