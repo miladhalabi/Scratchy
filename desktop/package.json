@@ -1,0 +1,5 @@
+{
+  "name": "scratchy-desktop",
+  "private": true,
+  "scripts": { "test": "pnpm -r test" }
+}
