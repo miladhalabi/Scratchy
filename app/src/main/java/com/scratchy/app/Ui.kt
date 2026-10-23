@@ -107,6 +107,14 @@ class Palette(ctx: Context) {
     val danger = c.danger
     val success = c.success
 
+    companion object {
+        /** The phone's wallpaper accent for the given mode, or null before Android 12. */
+        fun wallpaperAccent(ctx: Context, dark: Boolean): Int? =
+            if (Build.VERSION.SDK_INT >= 31)
+                ctx.getColor(if (dark) android.R.color.system_accent1_200 else android.R.color.system_accent1_600) or 0xFF000000.toInt()
+            else null
+    }
+
     /** Changes when the look changes (mode, wallpaper color or setting), so screens know to redraw. */
     val signature = "$theme/$dark/${accent.toString(16)}/${background.toString(16)}"
 

@@ -22,6 +22,9 @@ import android.widget.Toast
 /** All settings, grouped into cards. Everything is stored on this phone. */
 class SettingsActivity : Activity() {
 
+    private lateinit var pal: Palette
+    private val pageName by lazy { intent.getStringExtra(EXTRA_PAGE) }
+
     private var syncUi: () -> Unit = {}
     private var syncBusy = false
     private var syncPassword: String? = null
@@ -142,7 +145,7 @@ class SettingsActivity : Activity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        val pal = Palette(this)
+        pal = Palette(this)
         setTheme(
             if (pal.dark) android.R.style.Theme_Material_NoActionBar
             else android.R.style.Theme_Material_Light_NoActionBar
@@ -158,19 +161,99 @@ class SettingsActivity : Activity() {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(16), dp(10), dp(16), dp(40))
         }
+        val titles = mapOf(
+            "bar" to "Edge bar", "card" to "Card", "look" to "Appearance", "shots" to "Screenshots",
+            "sync" to "Sync", "vault" to "Secret notes", "ai" to "AI titles",
+        )
 
         // ---- header ----
         page.addView(iconButton(R.drawable.ic_back, pal.text, "Back") { finish() },
             LinearLayout.LayoutParams(dp(44), dp(44)))
         page.addView(TextView(this).apply {
-            text = "Settings"; textSize = 34f; setTextColor(pal.text)
+            text = titles[pageName] ?: "Settings"; textSize = 34f; setTextColor(pal.text)
             typeface = Typeface.create("sans-serif", Typeface.BOLD)
             letterSpacing = -0.02f
-            setPadding(dp(14), dp(4), 0, 0)
+            setPadding(dp(14), dp(4), 0, dp(14))
         })
 
-        // ---- EDGE BAR ----
-        page.addView(groupHeader(pal, "Edge bar"))
+        when (pageName) {
+            "bar" -> buildBar(page, prefs)
+            "card" -> buildCard(page)
+            "look" -> buildLook(page, prefs)
+            "shots" -> buildShots(page, prefs)
+            "sync" -> buildSync(page)
+            "vault" -> buildVault(page)
+            "ai" -> buildAi(page)
+            else -> buildMenu(page, prefs)
+        }
+
+        setContentView(ScrollView(this).apply {
+            setBackgroundColor(pal.background)
+            isFillViewport = true
+            isVerticalScrollBarEnabled = false
+            addView(page)
+        })
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (Palette(this).signature != pal.signature) { recreate(); return }
+        syncUi()
+        if (pageName == null) { /* the menu summaries can change after visiting a page */ recreateMenuIfStale() }
+    }
+
+    private var menuSnapshot: String? = null
+    private fun menuState(): String = listOf(
+        getSharedPreferences("overlay", MODE_PRIVATE).all.toString(), Sync.statusLine(this), Vault.isSetUp(this), AiSettings.raw(this, "key").isNotBlank()
+    ).joinToString("|")
+    private fun recreateMenuIfStale() {
+        val now = menuState()
+        if (menuSnapshot != null && menuSnapshot != now) { recreate(); return }
+        menuSnapshot = now
+    }
+
+    private fun open(page: String) = startActivity(android.content.Intent(this, SettingsActivity::class.java).putExtra(EXTRA_PAGE, page))
+
+    // ---- the menu ----
+
+    private fun buildMenu(page: LinearLayout, prefs: android.content.SharedPreferences) {
+        val modeNames = mapOf("recent" to "Recent", "last" to "Last", "scratch" to "Scratch", "new" to "New")
+        val shotNames = mapOf("ask" to "Ask", "auto" to "Auto-attach", "off" to "Off")
+        val colorName = Themes.labels[Themes.names.indexOf(pal.theme).coerceAtLeast(0)]
+        page.addView(GroupCard(this, pal).apply {
+            row {
+                navRow(pal, R.drawable.ic_grip, "Edge bar",
+                    (if (prefs.getBoolean("right", false)) "Right side" else "Left side") + " · ${prefs.getInt("bar_gap", 8)} dp from the edge") { open("bar") }
+            }
+            row { navRow(pal, R.drawable.ic_pen, "Card", "Opens on: ${modeNames[CardNote.mode(context)] ?: "Recent"}") { open("card") } }
+            row {
+                navRow(pal, R.drawable.ic_palette, "Appearance",
+                    "$colorName · " + (if (Appearance.isGlass(context)) "Glass" else "Solid") + " card") { open("look") }
+            }
+            row { navRow(pal, R.drawable.ic_screenshot, "Screenshots", shotNames[prefs.getString("shot_mode", "ask")] ?: "Ask") { open("shots") } }
+        })
+        page.addView(View(this), LinearLayout.LayoutParams(-1, dp(12)))
+        page.addView(GroupCard(this, pal).apply {
+            row {
+                navRow(pal, R.drawable.ic_sync, "Sync",
+                    Sync.statusLine(context).ifEmpty { "Not connected" }) { open("sync") }
+            }
+            row {
+                navRow(pal, R.drawable.ic_lock, "Secret notes",
+                    if (Vault.isSetUp(context)) "Password set" + (if (Vault.biometricEnabled(context)) " · fingerprint on" else "")
+                    else "Not set up yet") { open("vault") }
+            }
+            row {
+                navRow(pal, R.drawable.ic_sparkle, "AI titles",
+                    if (AiSettings.raw(context, "key").isNotBlank()) "Key added" else "No key yet") { open("ai") }
+            }
+        })
+        menuSnapshot = menuState()
+    }
+
+    // ---- pages ----
+
+    private fun buildBar(page: LinearLayout, prefs: android.content.SharedPreferences) {
         page.addView(GroupCard(this, pal).apply {
             row {
                 title(pal, "Side")
@@ -188,9 +271,9 @@ class SettingsActivity : Activity() {
                 caption(pal, "Move the bar in if your screen protector covers it.")
             }
         })
+    }
 
-        // ---- CARD ----
-        page.addView(groupHeader(pal, "Card"))
+    private fun buildCard(page: LinearLayout) {
         page.addView(GroupCard(this, pal).apply {
             row {
                 title(pal, "When the card opens")
@@ -210,9 +293,23 @@ class SettingsActivity : Activity() {
                 note = caption(pal, help[CardNote.mode(context)].orEmpty())
             }
         })
+    }
 
-        // ---- LOOK ----
-        page.addView(groupHeader(pal, "Look"))
+    private fun buildLook(page: LinearLayout, prefs: android.content.SharedPreferences) {
+        // Color
+        page.addView(groupHeader(pal, "Color"))
+        page.addView(GroupCard(this, pal).apply {
+            row {
+                addView(ColorSwatches(context, pal, pal.theme) { name ->
+                    prefs.edit().putString("theme_color", name).apply()
+                    recreate()
+                })
+                caption(pal, "Wallpaper follows your phone's colors (Android 12 and newer). If it doesn't look right on your phone, pick a color.")
+            }
+        })
+
+        // Card look
+        page.addView(groupHeader(pal, "Card"))
         val lookCard = GroupCard(this, pal)
         val sample = TextView(this).apply {
             text = "Your note"; textSize = 17f; setTextColor(pal.text)
@@ -272,7 +369,7 @@ class SettingsActivity : Activity() {
         page.addView(lookCard)
         sample.background = Appearance.card(this, pal)
 
-        // ---- ANIMATION ----
+        // Animation
         page.addView(groupHeader(pal, "Animation"))
         lateinit var speedRow: SliderRow
         page.addView(GroupCard(this, pal).apply {
@@ -286,19 +383,21 @@ class SettingsActivity : Activity() {
                 }, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(10) })
                 caption(pal, "Genie funnels the card into the bar and back out. Slide slides it in from the edge.")
             }
-            row {
-                speedRow = SliderRow(context, pal, "Genie speed", 50, 200,
-                    prefs.getInt("genie_speed", 100).coerceIn(50, 200), { "$it%" }) {
-                    prefs.edit().putInt("genie_speed", it).apply()
+            advanced {
+                row {
+                    speedRow = SliderRow(context, pal, "Genie speed", 50, 200,
+                        prefs.getInt("genie_speed", 100).coerceIn(50, 200), { "$it%" }) {
+                        prefs.edit().putInt("genie_speed", it).apply()
+                    }
+                    speedRow.enabledLook(prefs.getString("anim", "genie") == "genie")
+                    addView(speedRow)
+                    caption(pal, "100% is the default. Lower is slower, higher is faster.")
                 }
-                speedRow.enabledLook(prefs.getString("anim", "genie") == "genie")
-                addView(speedRow)
-                caption(pal, "100% is the default. Lower is slower, higher is faster.")
             }
         })
+    }
 
-        // ---- SCREENSHOTS ----
-        page.addView(groupHeader(pal, "Screenshots"))
+    private fun buildShots(page: LinearLayout, prefs: android.content.SharedPreferences) {
         page.addView(GroupCard(this, pal).apply {
             row {
                 title(pal, "When you take one")
@@ -316,19 +415,21 @@ class SettingsActivity : Activity() {
                 }, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(10) })
                 note = caption(pal, help[prefs.getString("shot_mode", "ask")].orEmpty())
             }
-            row {
-                title(pal, "Forget a waiting screenshot after")
-                val ttls = listOf(15 to "15 s", 30 to "30 s", 60 to "1 min", 120 to "2 min", 300 to "5 min")
-                addView(SegmentedControl(context, pal, ttls.map { it.second },
-                    ttls.indexOfFirst { it.first == prefs.getInt("shot_ttl", 60) }.coerceAtLeast(0)) { i ->
-                    prefs.edit().putInt("shot_ttl", ttls[i].first).apply()
-                }, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(10) })
-                caption(pal, "After this long the card stops offering it and the bar goes back to normal.")
+            advanced {
+                row {
+                    title(pal, "Forget a waiting screenshot after")
+                    val ttls = listOf(15 to "15 s", 30 to "30 s", 60 to "1 min", 120 to "2 min", 300 to "5 min")
+                    addView(SegmentedControl(context, pal, ttls.map { it.second },
+                        ttls.indexOfFirst { it.first == prefs.getInt("shot_ttl", 60) }.coerceAtLeast(0)) { i ->
+                        prefs.edit().putInt("shot_ttl", ttls[i].first).apply()
+                    }, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(10) })
+                    caption(pal, "After this long the card stops offering it and the bar goes back to normal.")
+                }
             }
         })
+    }
 
-        // ---- SYNC ----
-        page.addView(groupHeader(pal, "Sync"))
+    private fun buildSync(page: LinearLayout) {
         val syncStatus = TextView(this).apply { textSize = 14f; setTextColor(pal.secondary); setPadding(dp(2), dp(10), 0, 0) }
         val syncMain = TextView(this)
         val syncOff = TextView(this)
@@ -352,6 +453,28 @@ class SettingsActivity : Activity() {
                 caption(pal, "Keeps your notes, secret notes and images in sync across your devices through the hidden app folder of your Google Drive. Everything is encrypted on the phone first with a key made from your vault password, so Google can't read it. Use the same vault password on every device. If you forget it, the synced copy can't be recovered.")
             }
             row {
+                addView(syncButton(syncMain, true) { startSync() }, LinearLayout.LayoutParams(-1, dp(46)))
+                addView(syncStatus)
+                addView(syncNewPw.apply {
+                    text = "Enter the new vault password"; textSize = 15f; setTextColor(pal.accent)
+                    typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+                    setPadding(dp(2), dp(10), dp(8), dp(2))
+                    pressable(0.97f) { enterNewPassword() }
+                })
+                addView(syncButton(syncOff, false) {
+                    Sync.disconnect(this@SettingsActivity); syncUi()
+                }, LinearLayout.LayoutParams(-1, dp(40)).apply { topMargin = dp(6) })
+            }
+        })
+        syncUi()
+    }
+
+    private fun buildVault(page: LinearLayout) {
+        page.addView(GroupCard(this, pal).apply {
+            row {
+                caption(pal, "Secret notes are hidden from every list and search, and their text is encrypted on this phone. Open them by pulling the notes list down from the top, far enough that a lock appears, then letting go.")
+            }
+            row {
                 title(pal, "Vault password")
                 caption(pal, "Opens secret notes and encrypts your synced notes. Changing it re-encrypts everything in Drive; enter the new one on your other devices afterwards.")
                 addView(TextView(context).apply {
@@ -360,25 +483,12 @@ class SettingsActivity : Activity() {
                     setPadding(dp(2), dp(10), dp(8), dp(2))
                     pressable(0.97f) { changePassword() }
                 })
-                addView(syncNewPw.apply {
-                    text = "Enter the new vault password"; textSize = 15f; setTextColor(pal.accent)
-                    typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
-                    setPadding(dp(2), dp(6), dp(8), dp(2))
-                    pressable(0.97f) { enterNewPassword() }
-                })
-            }
-            row {
-                addView(syncButton(syncMain, true) { startSync() }, LinearLayout.LayoutParams(-1, dp(46)))
-                addView(syncStatus)
-                addView(syncButton(syncOff, false) {
-                    Sync.disconnect(this@SettingsActivity); syncUi()
-                }, LinearLayout.LayoutParams(-1, dp(40)).apply { topMargin = dp(6) })
             }
         })
-        syncUi()
+        syncNewPw = TextView(this)
+    }
 
-        // ---- AI TITLES ----
-        page.addView(groupHeader(pal, "AI titles"))
+    private fun buildAi(page: LinearLayout) {
         fun field(name: String, hint: String, secret: Boolean): EditText = EditText(this).apply {
             this.hint = hint
             setSingleLine(true)
@@ -415,17 +525,6 @@ class SettingsActivity : Activity() {
                 })
             }
             row {
-                title(pal, "Text model")
-                addView(field("textModel", AiSettings.DEFAULT_MODEL, secret = false),
-                    LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(10) })
-            }
-            row {
-                title(pal, "Image model")
-                addView(field("imageModel", "Same as text model", secret = false),
-                    LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(10) })
-                caption(pal, "Must understand images. Notes with an image use this one.")
-            }
-            row {
                 val result = TextView(context).apply {
                     textSize = 14f; setTextColor(pal.secondary)
                     setPadding(dp(2), dp(10), 0, 0)
@@ -442,15 +541,24 @@ class SettingsActivity : Activity() {
                 }, LinearLayout.LayoutParams(-1, dp(46)))
                 addView(result)
             }
-        })
-
-        setContentView(ScrollView(this).apply {
-            setBackgroundColor(pal.background)
-            isFillViewport = true
-            isVerticalScrollBarEnabled = false
-            addView(page)
+            advanced("Models") {
+                row {
+                    title(pal, "Text model")
+                    addView(field("textModel", AiSettings.DEFAULT_MODEL, secret = false),
+                        LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(10) })
+                }
+                row {
+                    title(pal, "Image model")
+                    addView(field("imageModel", "Same as text model", secret = false),
+                        LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(10) })
+                    caption(pal, "Must understand images. Notes with an image use this one.")
+                }
+            }
         })
     }
 
-    companion object { private const val REQ_CONSENT = 41 }
+    companion object {
+        private const val REQ_CONSENT = 41
+        const val EXTRA_PAGE = "page"
+    }
 }

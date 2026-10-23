@@ -1,6 +1,7 @@
 package com.scratchy.app
 
 import android.content.Context
+import android.graphics.drawable.GradientDrawable
 import android.graphics.Color
 import android.graphics.Typeface
 import android.view.Gravity
@@ -27,12 +28,14 @@ fun Context.groupHeader(pal: Palette, text: String) = TextView(this).apply {
     setPadding(dp(14), dp(26), 0, dp(8))
 }
 
-/** A rounded card holding related rows, separated by hairlines. */
-class GroupCard(ctx: Context, private val pal: Palette) : LinearLayout(ctx) {
+/** A rounded card holding related rows, separated by hairlines. [plain] makes a transparent group for nesting. */
+class GroupCard(ctx: Context, private val pal: Palette, plain: Boolean = false) : LinearLayout(ctx) {
     init {
         orientation = VERTICAL
-        background = roundRect(pal.surface, ctx.dp(18).toFloat())
-        setPadding(ctx.dp(16), ctx.dp(2), ctx.dp(16), ctx.dp(2))
+        if (!plain) {
+            background = roundRect(pal.surface, ctx.dp(22).toFloat())
+            setPadding(ctx.dp(18), ctx.dp(4), ctx.dp(18), ctx.dp(4))
+        }
     }
 
     /** Adds a row; build() fills it. A divider is drawn above every row except the first. */
@@ -40,11 +43,84 @@ class GroupCard(ctx: Context, private val pal: Palette) : LinearLayout(ctx) {
         if (childCount > 0) addView(View(context).apply { setBackgroundColor(pal.hairline) }, LayoutParams(-1, 1))
         val r = LinearLayout(context).apply {
             orientation = VERTICAL
-            setPadding(0, context.dp(14), 0, context.dp(14))
+            setPadding(0, context.dp(16), 0, context.dp(16))
             build()
         }
         addView(r, LayoutParams(-1, -2))
         return r
+    }
+
+    /**
+     * Rarely used options, folded away behind an "Advanced" line until you tap it.
+     * [build] adds rows to the hidden part.
+     */
+    fun advanced(label: String = "Advanced", build: GroupCard.() -> Unit) {
+        val body = GroupCard(context, pal, plain = true).apply(build)
+        val arrow = android.widget.ImageView(context).apply {
+            setImageResource(R.drawable.ic_chevron); setColorFilter(pal.secondary); rotation = 90f
+        }
+        row {
+            orientation = HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            addView(TextView(context).apply { text = label; textSize = 15f; setTextColor(pal.secondary) },
+                LayoutParams(0, -2, 1f))
+            addView(arrow, LayoutParams(context.dp(22), context.dp(22)))
+            pressable(0.99f) {
+                val open = body.visibility != View.VISIBLE
+                body.visibility = if (open) View.VISIBLE else View.GONE
+                arrow.rotation = if (open) 270f else 90f
+            }
+        }
+        body.visibility = View.GONE
+        addView(View(context).apply { setBackgroundColor(pal.hairline) }, LayoutParams(-1, 1))
+        addView(body, LayoutParams(-1, -2))
+    }
+}
+
+/** One tappable row of the settings menu: tinted icon, title, a one-line summary and an arrow. */
+fun LinearLayout.navRow(pal: Palette, icon: Int, title: String, summary: String, onTap: () -> Unit) {
+    val c = context
+    orientation = LinearLayout.HORIZONTAL
+    gravity = Gravity.CENTER_VERTICAL
+    addView(android.widget.FrameLayout(c).apply {
+        background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(pal.accentContainer) }
+        addView(android.widget.ImageView(c).apply { setImageResource(icon); setColorFilter(pal.accent) },
+            android.widget.FrameLayout.LayoutParams(c.dp(22), c.dp(22), Gravity.CENTER))
+    }, LinearLayout.LayoutParams(c.dp(42), c.dp(42)).apply { marginEnd = c.dp(14) })
+    addView(LinearLayout(c).apply {
+        orientation = LinearLayout.VERTICAL
+        addView(TextView(c).apply { text = title; textSize = 16f; setTextColor(pal.text) })
+        addView(TextView(c).apply {
+            text = summary; textSize = 13f; setTextColor(pal.secondary)
+            maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END
+        })
+    }, LinearLayout.LayoutParams(0, -2, 1f))
+    addView(android.widget.ImageView(c).apply { setImageResource(R.drawable.ic_chevron); setColorFilter(pal.secondary) },
+        LinearLayout.LayoutParams(c.dp(22), c.dp(22)))
+    pressable(0.99f) { onTap() }
+}
+
+/** The "Color" choice: wallpaper colors, or one fixed accent. */
+class ColorSwatches(ctx: Context, private val pal: Palette, selected: String, private val onPick: (String) -> Unit) : LinearLayout(ctx) {
+    private val ring = pal.text
+
+    init {
+        gravity = Gravity.CENTER_VERTICAL
+        Themes.names.forEachIndexed { i, name ->
+            val fill = if (name == "wallpaper") (Palette.wallpaperAccent(ctx, pal.dark) ?: Themes.fixed("blue", pal.dark).accent)
+            else if (pal.dark) Themes.accent(name).second else Themes.accent(name).first
+            addView(android.widget.FrameLayout(ctx).apply {
+                contentDescription = Themes.labels[i]
+                background = GradientDrawable().apply {
+                    shape = GradientDrawable.OVAL; setColor(fill)
+                    if (name == selected) setStroke(ctx.dp(3), ring)
+                }
+                if (name == "wallpaper") addView(TextView(ctx).apply {
+                    text = "✦"; textSize = 15f; setTextColor(Contrast.onColor(fill)); gravity = Gravity.CENTER
+                }, android.widget.FrameLayout.LayoutParams(-1, -1))
+                pressable(0.9f) { onPick(name) }
+            }, LayoutParams(0, ctx.dp(40), 1f).apply { marginStart = ctx.dp(if (i == 0) 0 else 8) })
+        }
     }
 }
 
