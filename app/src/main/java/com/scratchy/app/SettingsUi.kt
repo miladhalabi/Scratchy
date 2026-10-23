@@ -100,26 +100,29 @@ fun LinearLayout.navRow(pal: Palette, icon: Int, title: String, summary: String,
     pressable(0.99f) { onTap() }
 }
 
-/** The "Color" choice: wallpaper colors, or one fixed accent. */
+/** The "Color" choice: wallpaper colors, or one fixed accent. Round swatches, evenly spread. */
 class ColorSwatches(ctx: Context, private val pal: Palette, selected: String, private val onPick: (String) -> Unit) : LinearLayout(ctx) {
-    private val ring = pal.text
-
     init {
         gravity = Gravity.CENTER_VERTICAL
+        val size = ctx.dp(42)
         Themes.names.forEachIndexed { i, name ->
             val fill = if (name == "wallpaper") (Palette.wallpaperAccent(ctx, pal.dark) ?: Themes.fixed("blue", pal.dark).accent)
             else if (pal.dark) Themes.accent(name).second else Themes.accent(name).first
-            addView(android.widget.FrameLayout(ctx).apply {
+            val circle = FrameLayout(ctx).apply {
                 contentDescription = Themes.labels[i]
                 background = GradientDrawable().apply {
                     shape = GradientDrawable.OVAL; setColor(fill)
-                    if (name == selected) setStroke(ctx.dp(3), ring)
+                    if (name == selected) setStroke(ctx.dp(3), pal.text)
                 }
                 if (name == "wallpaper") addView(TextView(ctx).apply {
-                    text = "✦"; textSize = 15f; setTextColor(Contrast.onColor(fill)); gravity = Gravity.CENTER
-                }, android.widget.FrameLayout.LayoutParams(-1, -1))
+                    text = "✦"; textSize = 16f; setTextColor(Contrast.onColor(fill)); gravity = Gravity.CENTER
+                }, FrameLayout.LayoutParams(-1, -1))
                 pressable(0.9f) { onPick(name) }
-            }, LayoutParams(0, ctx.dp(40), 1f).apply { marginStart = ctx.dp(if (i == 0) 0 else 8) })
+            }
+            // Each swatch gets an equal slot and sits in its middle, so the circles stay round and evenly spaced.
+            addView(FrameLayout(ctx).apply {
+                addView(circle, FrameLayout.LayoutParams(size, size, Gravity.CENTER))
+            }, LayoutParams(0, size + ctx.dp(6), 1f))
         }
     }
 }

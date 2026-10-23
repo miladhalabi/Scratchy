@@ -305,17 +305,25 @@ class SettingsActivity : Activity() {
                     recreate()
                 })
                 caption(pal, "Wallpaper follows your phone's colors (Android 12 and newer). If it doesn't look right on your phone, pick a color.")
+                    .setPadding(0, dp(8), 0, 0)
             }
         })
 
         // Card look
         page.addView(groupHeader(pal, "Card"))
         val lookCard = GroupCard(this, pal)
-        val sample = TextView(this).apply {
-            text = "Your note"; textSize = 17f; setTextColor(pal.text)
-            typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+        // A small stand-in for a note card, drawn with the real card look so Style / Opacity changes show at once.
+        fun bar(widthDp: Int) = View(this).apply { background = roundRect(pal.secondary and 0xFFFFFF or 0x66000000, dp(4).toFloat()) }
+            .also { it.layoutParams = LinearLayout.LayoutParams(dp(widthDp), dp(8)).apply { topMargin = dp(8) } }
+        val sample = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(18), 0, dp(18), 0)
+            setPadding(dp(18), dp(14), dp(18), dp(14))
+            addView(TextView(context).apply {
+                text = "Your note"; textSize = 16f; setTextColor(pal.text)
+                typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+            })
+            addView(bar(150)); addView(bar(110))
         }
         lateinit var opacityRow: SliderRow
         lateinit var blurRow: SliderRow
@@ -330,15 +338,10 @@ class SettingsActivity : Activity() {
                 background = GradientDrawable(
                     GradientDrawable.Orientation.TL_BR,
                     intArrayOf(0xFFFFB300.toInt(), 0xFFFF3D6E.toInt(), 0xFF7A3CFF.toInt(), 0xFF1E88E5.toInt())
-                ).apply { cornerRadius = dp(14).toFloat() }
+                ).apply { cornerRadius = dp(16).toFloat() }
                 clipToOutline = true
-                addView(TextView(context).apply {
-                    text = "Behind the card"; textSize = 22f; setTextColor(Color.WHITE)
-                    typeface = Typeface.create("sans-serif", Typeface.BOLD)
-                }, FrameLayout.LayoutParams(-2, -2, Gravity.CENTER_VERTICAL or Gravity.START).apply { marginStart = dp(16) })
-                addView(sample, FrameLayout.LayoutParams(dp(170), dp(78), Gravity.CENTER_VERTICAL or Gravity.END)
-                    .apply { marginEnd = dp(16) })
-            }, LinearLayout.LayoutParams(-1, dp(120)))
+                addView(sample, FrameLayout.LayoutParams(dp(220), dp(104), Gravity.CENTER))
+            }, LinearLayout.LayoutParams(-1, dp(150)))
         }
         lookCard.row {
             title(pal, "Style")
