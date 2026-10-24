@@ -23,6 +23,7 @@ import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import android.widget.Toast
 
 /** Home: overlay on/off, search, and the list of notes (pinned first). */
 class MainActivity : Activity() {
@@ -36,6 +37,11 @@ class MainActivity : Activity() {
     private var photoDenied = false
     private lateinit var search: EditText
     private lateinit var notes: LinearLayout
+    private lateinit var chips: LinearLayout
+    private lateinit var chipScroll: android.widget.HorizontalScrollView
+    /** Category filter: null = all notes, "" = notes without a category. */
+    private var filter: String? = null
+    private var sorting = false
     private lateinit var root: FrameLayout
     private lateinit var syncLine: TextView
     /** True when this screen is the vault: only secret notes, behind the password / fingerprint lock. */
@@ -146,6 +152,14 @@ class MainActivity : Activity() {
         }
         searchRow.addView(search, LinearLayout.LayoutParams(0, dp(42), 1f))
         column.addView(searchRow, LinearLayout.LayoutParams(-1, dp(42)))
+
+        chips = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
+        chipScroll = android.widget.HorizontalScrollView(this).apply {
+            isHorizontalScrollBarEnabled = false; visibility = View.GONE
+            setPadding(0, dp(10), 0, 0)
+            addView(chips)
+        }
+        if (!secretMode) column.addView(chipScroll, LinearLayout.LayoutParams(-1, -2))
 
         notes = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         val scroller = PullScrollView(this).apply {
@@ -324,10 +338,57 @@ class MainActivity : Activity() {
         statusText.text = if (on) "Tap the bar on the screen edge from any app" else "Turn on to write notes over other apps"
     }
 
+    private fun chip(label: String, on: Boolean, accent: Boolean = false, onHold: (() -> Unit)? = null, onTap: () -> Unit) =
+        TextView(this).apply {
+            text = label; textSize = 14f
+            typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+            setTextColor(if (on) pal.onAccent else if (accent) pal.accent else pal.text)
+            setPadding(dp(14), 0, dp(14), 0); gravity = Gravity.CENTER
+            background = roundRect(if (on) pal.accent else pal.surface, dp(17).toFloat())
+            pressable(0.95f) { onTap() }
+            onHold?.let { h -> setOnLongClickListener { h(); true } }
+        }
+
+    private fun renderChips(all: List<Note>) {
+        val names = Categories.names(this)
+        if (filter != null && filter != "" && filter !in names) filter = null
+        val uncategorized = all.count { it.category.isBlank() }
+        chipScroll.visibility = if (secretMode || all.isEmpty()) View.GONE else View.VISIBLE
+        chips.removeAllViews()
+        fun add(v: View) = chips.addView(v, LinearLayout.LayoutParams(-2, dp(34)).apply { marginEnd = dp(8) })
+        add(chip("All", filter == null) { filter = null; renderNotes() })
+        names.forEach { n ->
+            add(chip(n, filter == n, onHold = { Categories.manage(this, n) { renderNotes() } }) { filter = n; renderNotes() })
+        }
+        if (names.isNotEmpty() && uncategorized > 0) add(chip("None", filter == "") { filter = ""; renderNotes() })
+        if (uncategorized > 0) add(chip(if (sorting) "Sorting…" else "✦ Sort with AI", false, accent = true) { sortWithAi() })
+    }
+
+    private fun sortWithAi() {
+        if (sorting) return
+        if (!Ai.configured(this)) {
+            Toast.makeText(this, "Add your OpenRouter key in Settings first", Toast.LENGTH_LONG).show()
+            startActivity(Intent(this, SettingsActivity::class.java))
+            return
+        }
+        sorting = true
+        renderNotes()
+        Categories.sortWithAi(this) { filed, err ->
+            sorting = false
+            renderNotes()
+            Toast.makeText(this,
+                if (err != null) (if (filed > 0) "Sorted $filed notes. $err" else err)
+                else if (filed == 0) "Nothing to sort" else "Sorted $filed notes", Toast.LENGTH_LONG).show()
+        }
+    }
+
     private fun renderNotes() {
         notes.removeAllViews()
         val query = search.text.toString()
-        val list = NoteStore.search(this, query, secret = secretMode)
+        if (!secretMode) renderChips(NoteStore.list(this))
+        val list = NoteStore.search(this, query, secret = secretMode).filter {
+            secretMode || filter == null || it.category == filter
+        }
         if (list.isEmpty()) {
             notes.addView(TextView(this).apply {
                 text = if (query.isBlank()) (if (secretMode) "No secret notes yet. Tap +." else "No notes yet. Tap + or use the edge bar.") else "No matches."
@@ -393,6 +454,12 @@ class MainActivity : Activity() {
                 addView(TextView(this@MainActivity).apply {
                     text = formatWhen(n.updatedAt); textSize = 13f; setTextColor(pal.secondary)
                 }, LinearLayout.LayoutParams(0, -2, 1f))
+                if (n.category.isNotBlank() && filter != n.category) addView(TextView(this@MainActivity).apply {
+                    text = n.category; textSize = 12f; setTextColor(pal.accent); maxLines = 1
+                    ellipsize = TextUtils.TruncateAt.END; maxWidth = dp(90)
+                    setPadding(dp(8), dp(2), dp(8), dp(2))
+                    background = roundRect((pal.accent and 0x00FFFFFF) or 0x26000000, dp(9).toFloat())
+                }, LinearLayout.LayoutParams(-2, -2).apply { marginEnd = dp(8) })
                 if (n.pinned) addView(ImageView(this@MainActivity).apply {
                     setImageResource(R.drawable.ic_pin); setColorFilter(pal.accent)
                 }, LinearLayout.LayoutParams(dp(16), dp(16)))

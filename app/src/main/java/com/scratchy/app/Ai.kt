@@ -44,6 +44,42 @@ object Ai {
         }
     }
 
+    /**
+     * Picks a category for each note: an existing one when it fits, otherwise a new short name (a note
+     * that fits nothing gets a category of its own). [done] runs on the main thread with (index to name, null)
+     * or (null, error message). Indexes refer to [texts].
+     */
+    fun categorize(ctx: Context, texts: List<String>, existing: List<String>, done: (Map<Int, String>?, String?) -> Unit) {
+        val app = ctx.applicationContext
+        io.execute {
+            val result = runCatching { requestCategories(app, texts, existing) }
+            main.post {
+                result.fold({ done(it, null) }, { done(null, it.message ?: "Something went wrong") })
+            }
+        }
+    }
+
+    private fun requestCategories(ctx: Context, texts: List<String>, existing: List<String>): Map<Int, String> {
+        val prompt = "You file notes into categories. Existing categories: " +
+            (if (existing.isEmpty()) "none yet" else existing.joinToString(", ") { "\"$it\"" }) + ". " +
+            "For each numbered note below choose the best existing category. If no existing category fits, " +
+            "make a new one: a short, general name of 1 to 2 words (like \"Work\", \"Shopping\", \"Ideas\", " +
+            "\"Health\"), never a sentence. A note that is unlike the others still gets a category of its own " +
+            "with a fitting new name. Reuse a category for similar notes instead of making near-duplicates. " +
+            "Write new names in the same language as the note. " +
+            "Reply with only a JSON object that maps each note number to its category, like {\"1\":\"Work\"}."
+        val body = texts.mapIndexed { i, t -> "[${i + 1}] ${t.take(300).replace('\n', ' ')}" }.joinToString("\n")
+        val messages = JSONArray().put(JSONObject().put("role", "user").put("content", "$prompt\n\nNotes:\n$body"))
+        val reply = chat(ctx, AiSettings.textModel(ctx), messages, 2000)
+        val start = reply.indexOf('{'); val end = reply.lastIndexOf('}')
+        if (start !in 0 until end) error("No categories came back")
+        val o = JSONObject(reply.substring(start, end + 1))
+        val out = HashMap<Int, String>()
+        o.keys().forEach { k -> k.trim().toIntOrNull()?.let { out[it - 1] = o.optString(k) } }
+        if (out.isEmpty()) error("No categories came back")
+        return out
+    }
+
     /** Sends a tiny message to check the key and model. */
     fun ping(ctx: Context, done: (String) -> Unit) {
         val app = ctx.applicationContext

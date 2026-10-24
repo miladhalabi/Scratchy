@@ -7,6 +7,7 @@ import android.graphics.BitmapFactory
 import android.content.Intent
 import android.os.Bundle
 import android.view.View
+import android.widget.TextView
 import android.widget.Toast
 import android.view.WindowManager
 import android.widget.ImageView
@@ -62,6 +63,7 @@ class NoteActivity : Activity() {
                 if (on) madeSecretHere = true
                 editor.setSecret(on)
                 (it0 as ImageView).setColorFilter(if (on) pal.accent else pal.secondary)
+                showCategory()
                 Toast.makeText(this, if (on) "Secret. Find it under the lock." else "No longer secret", Toast.LENGTH_SHORT).show()
             }
         }
@@ -73,6 +75,7 @@ class NoteActivity : Activity() {
                 editor.refreshFrom(n)
                 tint(editor.note.pinned)
                 (it0 as? ImageView)?.setColorFilter(if (editor.note.secret) pal.accent else pal.secondary)
+                showCategory()
             }
         }
 
@@ -96,14 +99,39 @@ class NoteActivity : Activity() {
             addView(iconButton(R.drawable.ic_delete, pal.secondary, "Delete") { confirmDelete() },
                 LinearLayout.LayoutParams(dp(44), dp(44)))
         }
+        categoryPill = TextView(this).apply {
+            textSize = 13f; maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END
+            typeface = android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL)
+            setPadding(dp(12), 0, dp(12), 0); gravity = android.view.Gravity.CENTER
+            pressable(0.95f) {
+                if (editor.note.secret) Toast.makeText(this@NoteActivity, "Secret notes have no category", Toast.LENGTH_SHORT).show()
+                else Categories.pick(this@NoteActivity, editor.note.category, editor.note) { name ->
+                    editor.setCategory(name); showCategory()
+                }
+            }
+        }
+        showCategory()
         setContentView(LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(pal.background)
             addView(top, LinearLayout.LayoutParams(-1, -2))
+            addView(categoryPill, LinearLayout.LayoutParams(-2, dp(30)).apply { marginStart = dp(20); bottomMargin = dp(4) })
             addView(editor, LinearLayout.LayoutParams(-1, 0, 1f))
         })
 
         if (existing == null) editor.titleEdit.requestFocus()
+    }
+
+    private lateinit var categoryPill: TextView
+
+    private fun showCategory() {
+        val c = editor.note.category
+        val secret = editor.note.secret
+        categoryPill.visibility = if (secret) android.view.View.GONE else android.view.View.VISIBLE
+        categoryPill.text = if (c.isEmpty()) "＋ Category" else c
+        categoryPill.setTextColor(if (c.isEmpty()) pal.secondary else pal.accent)
+        categoryPill.background = roundRect(
+            if (c.isEmpty()) pal.surface else (pal.accent and 0x00FFFFFF) or 0x26000000, dp(15).toFloat())
     }
 
     /** Full-screen look at an attached image; tap anywhere to close. */

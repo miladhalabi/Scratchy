@@ -82,8 +82,10 @@ object Merge {
         }
         val pinned = if (o.pinned == t.pinned) o.pinned else if (o.pinned != base.pinned) o.pinned else t.pinned
         val secret = if (o.secret == t.secret) o.secret else if (o.secret != base.secret) o.secret else t.secret
+        val category = if (secret) "" else if (o.category == t.category) o.category
+            else if (o.category != base.category) o.category else t.category
         return newest.copy(
-            title = title, body = body, images = images, pinned = pinned, secret = secret,
+            title = title, body = body, images = images, pinned = pinned, secret = secret, category = category,
             rev = maxOf(o.rev, t.rev) + 1, updatedAt = maxOf(o.updatedAt, t.updatedAt),
         )
     }

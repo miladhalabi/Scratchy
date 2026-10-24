@@ -479,9 +479,15 @@ class NoteEditor(
         onChanged(note)
     }
 
+    fun setCategory(name: String) {
+        commit()
+        note = note.copy(category = name, images = images.toList())
+        onChanged(note)
+    }
+
     fun setSecret(secret: Boolean) {
         commit()
-        note = note.copy(secret = secret, images = images.toList())
+        note = note.copy(secret = secret, category = "", images = images.toList())
         onChanged(note)
     }
 

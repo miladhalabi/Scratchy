@@ -21,12 +21,14 @@ data class Note(
     val secret: Boolean = false,
     /** Counts edits. Sync orders versions by this first, so a phone with a wrong clock can't win. */
     val rev: Long = 0,
+    /** Name of the category, "" = none. Never set on secret notes, so no name leaks from the vault. */
+    val category: String = "",
 ) {
     val isBlank get() = title.isBlank() && body.isBlank() && images.isEmpty()
 
     /** Same visible content and flags (ignores timestamps and the edit counter). */
     fun sameContent(o: Note) = title == o.title && body == o.body && images == o.images &&
-        pinned == o.pinned && secret == o.secret
+        pinned == o.pinned && secret == o.secret && category == o.category
 
     /** Title, or the first non-blank body line when there is no title. */
     val heading: String
@@ -66,7 +68,7 @@ object NoteStore {
                 o.optLong("createdAt"), o.optLong("updatedAt"), o.optBoolean("pinned"),
                 o.optJSONArray("images")?.let { a -> (0 until a.length()).map { a.getString(it) } }
                     ?: emptyList(),
-                secret, o.optLong("rev")
+                secret, o.optLong("rev"), if (secret) "" else o.optString("category")
             )
         }.sortedWith(compareByDescending<Note> { it.pinned }.thenByDescending { it.updatedAt })
     }
@@ -80,7 +82,8 @@ object NoteStore {
         val q = query.trim()
         if (q.isEmpty()) return list(ctx, secret)
         return list(ctx, secret).filter {
-            it.title.contains(q, ignoreCase = true) || it.body.contains(q, ignoreCase = true)
+            it.title.contains(q, ignoreCase = true) || it.body.contains(q, ignoreCase = true) ||
+                it.category.contains(q, ignoreCase = true)
         }
     }
 
@@ -179,7 +182,7 @@ object NoteStore {
                 .put("createdAt", it.createdAt).put("updatedAt", it.updatedAt).put("pinned", it.pinned)
                 .put("images", JSONArray(it.images)).put("secret", it.secret).put("rev", it.rev)
             if (it.secret) o.put("enc", Vault.encrypt(JSONObject().put("title", it.title).put("body", it.body).toString()))
-            else o.put("title", it.title).put("body", it.body)
+            else o.put("title", it.title).put("body", it.body).put("category", it.category)
             arr.put(o)
         }
         val tmp = File(ctx.filesDir, "notes.json.tmp")

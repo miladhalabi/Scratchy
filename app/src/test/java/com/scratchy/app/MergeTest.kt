@@ -159,4 +159,34 @@ class MergeTest {
         assertFalse(Merge.staleRelay(null, note("y", rev = 1)))
         assertFalse(Merge.staleRelay(note("x", rev = 5), null))          // a deletion is not "older"
     }
+
+    // ---- categories ----
+
+    @Test fun category_changed_on_one_side_is_kept_when_text_changed_on_the_other() {
+        val base = note("a\nb")
+        val ours = base.copy(category = "Work", rev = 2)
+        val theirs = base.copy(body = "a\nB", rev = 2, updatedAt = 200)
+        val r = Merge.resolve(base, side(ours), side(theirs))!!
+        assertEquals("Work", r.note!!.category)
+        assertEquals("a\nB", r.note!!.body)
+        assertNull(r.conflictCopy)
+    }
+
+    @Test fun category_changed_only_on_the_other_side_wins() {
+        val base = note("a", pinned = true).copy(category = "Home")
+        val ours = base.copy(body = "a!", rev = 2)
+        val theirs = base.copy(category = "Work", rev = 2, updatedAt = 200)
+        assertEquals("Work", Merge.resolve(base, side(ours), side(theirs))!!.note!!.category)
+    }
+
+    @Test fun category_counts_as_content() {
+        assertFalse(note("a").sameContent(note("a").copy(category = "Work")))
+    }
+
+    @Test fun category_names_are_cleaned_and_reuse_existing_spelling() {
+        assertEquals("Work", Categories.clean("  \"Work\".\n"))
+        assertEquals("Work", Categories.canonical("work", listOf("Home", "Work")))
+        assertEquals("Travel", Categories.canonical("Travel", listOf("Home", "Work")))
+        assertEquals(Categories.MAX, Categories.clean("x".repeat(80)).length)
+    }
 }
