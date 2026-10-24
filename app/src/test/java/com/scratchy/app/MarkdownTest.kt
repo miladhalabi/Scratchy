@@ -87,4 +87,20 @@ class MarkdownTest {
         val plain = "Name Age\nBob 4"
         assertEquals(Markdown.words(plain), Markdown.words("| Name | Age |\n| --- | --- |\n| Bob | 4 |"))
     }
+
+    @Test fun arabic_prefixes_may_be_spaced_differently_but_letters_must_match() {
+        val a = "اخر فترة وشتغلنا على مشاريع IoT والاتصالات"
+        assertEquals(Markdown.letters(a), Markdown.letters("# اخر فترة\n- و شتغلنا على مشاريع **IoT** والاتصالات"))
+        assertNull(Markdown.firstDifference(a, "اخر فترة وشتغلنا على مشاريع IoT والاتصالات"))
+        assertNotNull(Markdown.firstDifference(a, "اخر فترة وشتغلنا على مشاريع IoT والاتصالات."+"ا"))
+    }
+
+    @Test fun diacritics_count_as_changes() {
+        assertNotNull(Markdown.firstDifference("كتب", "كَتَبَ"))
+    }
+
+    @Test fun first_difference_shows_where() {
+        val d = Markdown.firstDifference("one two three", "one two tree")!!
+        assertTrue(d.first.contains("three") || d.first.contains("thr"))
+    }
 }

@@ -96,8 +96,8 @@ object Ai {
     }
 
     private fun requestFormat(ctx: Context, md: String): String {
-        val want = Markdown.words(md)
         var extra = ""
+        var diff: Pair<String, String>? = null
         repeat(2) {
             val prompt = "You are a formatter. Turn the text below into well-structured Markdown WITHOUT changing its words.\n" +
                 "Rules:\n" +
@@ -111,10 +111,11 @@ object Ai {
                 "5. Reply with only the Markdown, with no code fence around it.\n$extra\nText:\n$md"
             val reply = chat(ctx, AiSettings.textModel(ctx), JSONArray().put(JSONObject().put("role", "user").put("content", prompt)), 4000, 0.1)
             val out = reply.trim().removePrefix("```markdown").removePrefix("```md").removePrefix("```").removeSuffix("```").trim('\n')
-            if (out.isNotBlank() && Markdown.words(out) == want) return out
+            diff = Markdown.firstDifference(md, out)
+            if (out.isNotBlank() && diff == null) return out
             extra = "Your last answer changed, added or dropped some words. This time keep every single word exactly as written.\n"
         }
-        error("The AI changed some of the words, so your note was left as it was. Try again.")
+        error("The AI changed the text (“${diff?.first}” became “${diff?.second}”), so your note was left as it was.")
     }
 
     /** Sends a tiny message to check the key and model. */

@@ -61,21 +61,27 @@ class RList(
     ) {
         if (!first) return
         val size = p.textSize
-        val left = if (dir > 0) x + indent() else x - indent() - marker()      // the marker area, in screen terms
+        val rtl = dir < 0
+        // Markers sit at the start edge of the line: the left in English, the right in Arabic.
+        val startX = if (rtl) x - indent() else x + indent()
         when (kind) {
             Markdown.Kind.BULLET -> {
                 paint.color = secondary; paint.style = Paint.Style.FILL
-                c.drawCircle(left + marker() * 0.4f, baseline - size * 0.3f, size * 0.12f, paint)
+                c.drawCircle(startX + (if (rtl) -1 else 1) * marker() * 0.4f, baseline - size * 0.3f, size * 0.12f, paint)
             }
             Markdown.Kind.NUMBER -> {
                 paint.color = secondary; paint.textSize = size; paint.typeface = p.typeface
                 val label = "${RichText.numberOf(text as Spanned, start)}."
-                c.drawText(label, left + marker() * 0.8f - paint.measureText(label), baseline.toFloat(), paint)
+                val w = paint.measureText(label)
+                c.drawText(label, if (rtl) startX - marker() * 0.8f else startX + marker() * 0.8f - w, baseline.toFloat(), paint)
             }
-            Markdown.Kind.TASK -> drawCheckbox(
-                c, paint, box, tick, left + size * 0.04f, baseline - size * 0.32f, size * 0.95f,
-                checked, accent, onAccent, secondary, density,
-            )
+            Markdown.Kind.TASK -> {
+                val s = size * 0.95f
+                drawCheckbox(
+                    c, paint, box, tick, if (rtl) startX - s - size * 0.04f else startX + size * 0.04f, baseline - size * 0.32f, s,
+                    checked, accent, onAccent, secondary, density,
+                )
+            }
         }
     }
 }

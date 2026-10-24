@@ -285,7 +285,9 @@ class NoteEditor(
                 val off = layout.getLineStart(line)
                 RichText.tableAt(text, off)?.let { (_, at) -> editTableAt(at); return true }
                 val margin = RichText.taskMarginAt(text, off) ?: return false
-                if (RichText.paraStart(text, off) == off && ev.x < bodyEdit.totalPaddingLeft + margin) {
+                val rtl = layout.getParagraphDirection(line) == android.text.Layout.DIR_RIGHT_TO_LEFT
+                val onBox = if (rtl) ev.x > bodyEdit.width - bodyEdit.totalPaddingRight - margin else ev.x < bodyEdit.totalPaddingLeft + margin
+                if (RichText.paraStart(text, off) == off && onBox) {
                     if (RichText.toggleTaskAt(text, off)) { scheduleSave(); bodyEdit.invalidate() }
                 }
                 return false

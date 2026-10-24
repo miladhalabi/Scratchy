@@ -95,7 +95,7 @@ object Markdown {
 
     // ---- comparing texts ignoring the markdown on them ----
 
-    private val wordRe = Regex("[\\p{L}\\p{N}]+")
+    private val wordRe = Regex("[\\p{L}\\p{M}\\p{N}]+")
 
     /** Just the words of a text, with all markdown symbols, list markers and link addresses left out. */
     fun words(md: String): List<String> {
@@ -103,6 +103,19 @@ object Markdown {
         t = t.replace(Regex("(?m)^\\s*[-*+]\\s+\\[[ xX]]\\s"), "")
         t = t.replace(Regex("(?m)^\\s*\\d{1,3}[.)]\\s"), "")
         return wordRe.findAll(t).map { it.value }.toList()
+    }
+
+    /** Every letter, mark and digit of a text joined together: equal for two texts that differ only in spacing or markdown. */
+    fun letters(md: String) = words(md).joinToString("")
+
+    /** Where two texts first differ (as short snippets), or null when their letters are the same. */
+    fun firstDifference(original: String, other: String): Pair<String, String>? {
+        val a = letters(original); val b = letters(other)
+        if (a == b) return null
+        var i = 0
+        while (i < a.length && i < b.length && a[i] == b[i]) i++
+        fun snip(s: String) = (if (i > 6) "…" else "") + s.substring((i - 6).coerceAtLeast(0), (i + 14).coerceAtMost(s.length)).ifEmpty { "(nothing)" }
+        return snip(a) to snip(b)
     }
 
     // ---- plain text of one line (note headings, pickers) ----
