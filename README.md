@@ -46,7 +46,7 @@ An idea shows up while you are watching a video, reading, or mid-chat. Opening a
 ## Keep it private
 
 - **A vault with no door in sight.** Nothing on screen hints it exists. Pull the notes list down a long way, a lock appears with a haptic click, let go and it opens. Pull back and it disappears. A normal scroll can never open it.
-- **Password and fingerprint.** Secret notes are removed from every list, search, the card and the screenshot picker. They are encrypted on the phone with a key that never leaves Android's hardware-backed Keystore, and screenshots and the recent-apps preview are blocked on those screens.
+- **Password and fingerprint.** Secret notes are removed from every list, search, the card and the screenshot picker. They are encrypted on the phone with a key that never leaves Android's Keystore, and screenshots and the recent-apps preview are blocked on those screens.
 - **Your data stays yours.** No account, no ads, no tracking. Nothing leaves the phone unless you turn on sync or ask for an AI feature, and AI only ever sees the note you asked about.
 
 ## Sync, the way it should work
