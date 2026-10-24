@@ -16,6 +16,7 @@
 
 <p align="center">
   <a href="#why">Why</a> ·
+  <a href="#the-app">The app</a> ·
   <a href="#features">Features</a> ·
   <a href="#privacy">Privacy</a> ·
   <a href="#install">Install</a> ·
@@ -30,15 +31,23 @@ You are watching a video, reading an article, in the middle of a chat, and an id
 
 Scratchy keeps a thin bar on the edge of your screen. Tap it and a note card opens **right on top of what you are doing**. Type, close, carry on. You never left the app.
 
-<!--
-  Your own screenshots go here. Drop the files in docs/screenshots/ and add, for example:
+## The app
 
-  ## The app
-  <p align="center">
-    <img src="docs/screenshots/notes.png" width="24%"> <img src="docs/screenshots/card.png" width="24%">
-    <img src="docs/screenshots/categories.png" width="24%"> <img src="docs/screenshots/vault.png" width="24%">
-  </p>
--->
+<p align="center">
+  <img src="docs/img/gallery.png" alt="Scratchy on a phone: the notes grid with category chips, the floating card over the home screen, the screenshot chooser and the sync page" width="100%">
+</p>
+
+<sub>Real screenshots, taken on the phone it was built for.</sub>
+
+## How it feels
+
+<table>
+  <tr>
+    <td width="33%" valign="top"><h4>1 · Tap the edge</h4>The bar is always there, thin enough to forget. Tap or swipe it from any app.</td>
+    <td width="33%" valign="top"><h4>2 · Write it down</h4>The card opens over what you are doing, with your last note ready to continue, or a fresh one.</td>
+    <td width="33%" valign="top"><h4>3 · Carry on</h4>Close it and the card shrinks back into the bar. Later, the idea is filed and synced.</td>
+  </tr>
+</table>
 
 ## Features
 
