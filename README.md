@@ -33,10 +33,22 @@ An idea shows up while you are watching a video, reading, or mid-chat. Opening a
 - 📌 **Pin it** and the card stays on screen while you carry on using the phone: copy from a page, glance at the card, paste.
 - 🧠 **It remembers.** The card opens on your last note ready to continue, on one permanent scratch note, or on a fresh one. You choose.
 - 📸 **Screenshot? One tap to file it.** The bar turns green the moment you take one. Open the card and choose: add to the current note, start a new note, or pick another note. Or let it attach on its own.
-- ✍️ **Markdown, all the way down.** Notes *are* markdown: paste an answer from ChatGPT, Claude or any AI app and it just works. Headings, **bold**, *italics*, `code`, fenced code blocks, quotes, links, tables and rules are drawn as you type (the symbols stay, dimmed, so you can still edit them), and everywhere else, the grid, the card, the previews, they read clean with the symbols hidden. What you copy out is the same markdown you pasted in.
-- ✨ **Format with AI.** Paste or type plain text, tap the **✨ Format with AI** button in the note screen, and it becomes headings, lists, checklists, bold and tables, with **your words exactly as they were**. The app checks every word of the result against your original and throws the AI's answer away if a single word changed. One tap to undo. It only runs in the app, never in the floating card.
-- ☑️ **Real lists.** `- [ ]` checklists show as checkboxes you tap, bullets and numbered lists continue on Enter and end on an empty line, and Backspace removes a whole list marker in one go. Your old checklist notes convert themselves.
 - 📋 **A real editor, over any app.** Images inside the note, paste from the clipboard (including images from the keyboard), and its own copy, cut and paste bar, because an overlay window cannot show Android's text menu.
+
+## ✍️ A rich editor, no symbols in sight
+
+Nobody has to know markdown. You format with buttons, and the note is still saved as plain markdown underneath, so it pastes cleanly into ChatGPT, Notion or Obsidian.
+
+- 🔠 **The Aa panel.** One button in the note's top bar opens a roomy panel of large, labelled tiles: **Bold, Italic, Strike, Code, Link**, three **heading** sizes, **Bullets, Numbers, Checklist, Quote**, **Table**, and **Indent / Outdent**. The tile lights up for whatever your cursor is in. It never takes screen space when you are not using it, and it never takes the keyboard or your selection.
+- 📊 **Real tables.** A table is drawn as an actual grid, with a tinted header, rounded borders and cells that wrap. Tap it and a table editor opens: type in cells, add or delete rows and columns, or delete the table. Wide tables scroll sideways inside the editor.
+- ☑️ **Real lists.** Checklists show as checkboxes you tap. Bullets and numbered lists continue on Enter, end on an empty line, nest with Indent, and Backspace at the start of an item removes the list instead of joining lines.
+- ⌨️ **Notion-style shortcuts.** Type `- `, `1. `, `# `, `> ` or `[] ` at the start of a line and it turns into that format.
+- 📋 **Paste from any AI app.** Copy an answer with the app's Copy button and paste it: headings, bold, lists, links and tables arrive already formatted, with no markdown symbols left over.
+- ✨ **Format with AI.** A sparkle button in the note's top bar turns plain text into a structured note: bullets for lists, headings for titles, bold for key terms, tables where the text is tabular. **Your words stay exactly as they are.** The app compares every letter of the AI's answer with your original and throws the answer away if anything changed, then tries again. A chip under the title shows the progress, with one tap to **Undo**. It works for Arabic and mixed Arabic and English notes too, and only runs in the app, never in the floating card.
+- 🌍 **Right-to-left done properly.** Arabic lines get their bullets, numbers and checkboxes on the right, and tapping a checkbox works on the right edge.
+- 🪟 **The floating card stays simple.** No formatting buttons there, just fast typing. Formatting and tables you made in the app show up in the card, and the typing shortcuts work.
+- 🔁 **Old notes just work.** Your earlier checklists convert themselves. A note you only open and close is never rewritten.
+
 ## 🗂️ Organize
 
 - 🧱 **A card-style notes grid** with pinned notes first, big image previews cropped from the middle, and instant search across titles, text and categories.
@@ -77,11 +89,11 @@ A short menu with one small page per topic, and an *Advanced* fold for the rare 
 | 📸 **Screenshots** | **Ask** (the bar turns green and the card asks where it goes), **Auto-attach**, or **Off**. *Advanced:* forget a waiting screenshot after 15 s, 30 s, 1, 2 or 5 min. |
 | 🔄 **Sync** | Connect Google Drive, **Sync now**, disconnect, see the status, and enter a new vault password after changing it on another device. |
 | 🔒 **Secret notes** | Change the vault password (everything in Drive is re-encrypted). |
-| ✨ **AI** | Turn **category suggestions** on or off. Paste your **OpenRouter key** and test the connection. *Advanced:* the text model and the image model. |
+| ✨ **AI** | Turn **category suggestions** on or off. The same text model is used for titles, categories and **Format with AI**. Paste your **OpenRouter key** and test the connection. *Advanced:* the text model and the image model. |
 
 ## 🧰 Built to last
 
-Plain Kotlin and Android Views, no Compose and no XML layouts. The merge engine and the markdown logic are pure Kotlin with 34 unit tests, and the sync format is versioned. About 6,000 lines.
+Plain Kotlin and Android Views, no Compose and no XML layouts. The merge engine and the markdown logic are pure Kotlin with 39 unit tests, and the sync format is versioned. About 8,000 lines of Kotlin.
 
 ## 🔏 Privacy
 

@@ -57,7 +57,7 @@ Requirements: JDK 17+, Android SDK (platform 35), a device with USB debugging.
 
 ```bash
 ./gradlew assembleRelease          # app/build/outputs/apk/release/app-release.apk
-./gradlew testDebugUnitTest        # merge logic tests
+./gradlew testDebugUnitTest        # merge and markdown tests
 adb install -r app/build/outputs/apk/release/app-release.apk
 ```
 
@@ -113,7 +113,9 @@ Then set `BASE` in `app/src/main/java/com/scratchy/app/Live.kt` to your Worker U
 | `SyncData.kt` | Note JSON format and per-note sync state |
 | `Live.kt` | WebSocket connection to the relay |
 | `SyncWorker.kt` | 15-minute background sync |
-| `Markdown.kt` | Notes are markdown: list/checkbox logic, `legacy()` for old ☐/☑ notes, `style()` while editing, `render()` for reading |
+| `Markdown.kt` | Pure markdown helpers: list and checkbox logic, `legacy()` for old ☐/☑ notes, `words()`/`letters()` for the AI word check, `render()` for the read-only grid and previews |
+| `RichText.kt` | The rich editor's model: paragraph and inline spans, `fromMarkdown()` and `toMarkdown()`, list continuation, shortcuts, tables as one placeholder character |
+| `TableEditor.kt`, `FormatBar.kt` | The table editing sheet, and the drawn icons used by the Aa panel and the AI button |
 | `Categories.kt`, `Dialogs.kt` | Categories (names, AI sorting, pickers) and the app's own dialog card |
 | `Ai.kt`, `Attachments.kt`, `Screenshots.kt`, `Checklist.kt`, `HoldToDelete.kt`, `Appearance.kt`, `CardNote.kt`, `Ui.kt` | Supporting pieces |
 
