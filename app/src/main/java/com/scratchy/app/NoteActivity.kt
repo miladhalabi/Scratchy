@@ -99,6 +99,7 @@ class NoteActivity : Activity() {
             addView(iconButton(R.drawable.ic_delete, pal.secondary, "Delete") { confirmDelete() },
                 LinearLayout.LayoutParams(dp(44), dp(44)))
         }
+        editor.onCategoryChanged = { showCategory() }
         categoryPill = TextView(this).apply {
             textSize = 13f; maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END
             typeface = android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL)

@@ -18,6 +18,9 @@ object AiSettings {
     fun apiKey(ctx: Context) = p(ctx).getString("key", "").orEmpty().trim()
     fun textModel(ctx: Context) = p(ctx).getString("textModel", DEFAULT_MODEL).orEmpty().ifBlank { DEFAULT_MODEL }
     fun imageModel(ctx: Context) = p(ctx).getString("imageModel", "").orEmpty().ifBlank { textModel(ctx) }
+    /** Offer a category for a note you are writing (a quiet chip, never a popup). */
+    fun suggestCategories(ctx: Context) = p(ctx).getBoolean("suggestCategories", true)
+    fun setSuggestCategories(ctx: Context, on: Boolean) = p(ctx).edit().putBoolean("suggestCategories", on).apply()
     fun set(ctx: Context, name: String, value: String) = p(ctx).edit().putString(name, value.trim()).apply()
     fun raw(ctx: Context, name: String) = p(ctx).getString(name, "").orEmpty()
 }

@@ -78,6 +78,11 @@ class NoteEditor(
     private val suggestRow = LinearLayout(ctx)
     private val suggestScroll = HorizontalScrollView(ctx)
     private var suggesting = false
+    /** The quiet category offer under the title. Asked at most once per note, and never for secret notes. */
+    private val categoryOffer = android.widget.TextView(ctx)
+    private val offered = HashSet<String>()
+    private val askCategory = Runnable { offerCategory() }
+    private val hideOffer = Runnable { categoryOffer.visibility = View.GONE }
     private val handler = Handler(Looper.getMainLooper())
     private val autosave = Runnable { commit() }
     private var suppress = false
@@ -133,6 +138,15 @@ class NoteEditor(
             addView(suggestRow)
         }
         addView(suggestScroll, LayoutParams(-1, -2))
+        categoryOffer.apply {
+            visibility = View.GONE
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
+            setTextColor(pal.accent)
+            maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END
+            setPadding(dp(12), 0, dp(12), 0); gravity = Gravity.CENTER
+            background = roundRect((pal.accent and 0x00FFFFFF) or 0x26000000, dp(14).toFloat())
+        }
+        addView(categoryOffer, LayoutParams(-2, dp(28)).apply { topMargin = dp(6); marginStart = dp(4) })
 
         // One scrolling page: images sit in the flow of the note, above the text.
         bodyEdit.minHeight = dp(if (compact) 120 else 240)
@@ -166,7 +180,10 @@ class NoteEditor(
             override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
             override fun afterTextChanged(e: Editable?) {
-                if (!suppress) { handler.removeCallbacks(autosave); handler.postDelayed(autosave, 500) }
+                if (!suppress) {
+                    handler.removeCallbacks(autosave); handler.postDelayed(autosave, 500)
+                    handler.removeCallbacks(askCategory); handler.postDelayed(askCategory, 3000)
+                }
                 if (compactMode && !suppress) hideMenu()
             }
         }
@@ -319,6 +336,8 @@ class NoteEditor(
 
     fun load(n: Note) {
         suppress = true
+        handler.removeCallbacks(askCategory); handler.removeCallbacks(hideOffer)
+        categoryOffer.visibility = View.GONE
         note = n
         images.clear(); images.addAll(n.images)
         titleEdit.setText(n.title)
@@ -393,6 +412,29 @@ class NoteEditor(
             else showChips(listOf(error ?: "Couldn't get suggestions"), tappable = false)
         }
     }
+
+    /** After a pause in typing: ask the AI once for a category and show it as a small tappable chip. */
+    private fun offerCategory() {
+        val n = note
+        val text = (titleEdit.text.toString() + "\n" + bodyEdit.text.toString()).trim()
+        if (!AiSettings.suggestCategories(context) || !Ai.configured(context)) return
+        if (n.secret || n.category.isNotBlank() || n.id in offered || text.length < 25) return
+        offered += n.id
+        Categories.suggestFor(context, n.copy(title = titleEdit.text.toString(), body = bodyEdit.text.toString())) { name, _ ->
+            if (name == null || note.id != n.id || note.category.isNotBlank() || note.secret) return@suggestFor
+            categoryOffer.text = "✦ $name"
+            categoryOffer.visibility = View.VISIBLE
+            categoryOffer.setOnClickListener {
+                handler.removeCallbacks(hideOffer); categoryOffer.visibility = View.GONE
+                setCategory(name)
+                onCategoryChanged?.invoke(note)
+            }
+            handler.removeCallbacks(hideOffer); handler.postDelayed(hideOffer, 15000)
+        }
+    }
+
+    /** Called after a category was set by accepting the offered one (so a screen can refresh its own label). */
+    var onCategoryChanged: ((Note) -> Unit)? = null
 
     private fun showChips(items: List<String>, tappable: Boolean) {
         suggestRow.removeAllViews()
@@ -480,6 +522,7 @@ class NoteEditor(
     }
 
     fun setCategory(name: String) {
+        categoryOffer.visibility = View.GONE
         commit()
         note = note.copy(category = name, images = images.toList())
         onChanged(note)

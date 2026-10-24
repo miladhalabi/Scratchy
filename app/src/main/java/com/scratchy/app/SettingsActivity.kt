@@ -513,6 +513,14 @@ class SettingsActivity : Activity() {
                 caption(pal, "Tap the ✨ next to a note's title and Scratchy suggests three titles from its text, or from its first image. Only that note is sent, only when you tap, to OpenRouter.")
             }
             row {
+                title(pal, "Suggest a category")
+                addView(SegmentedControl(context, pal, listOf("On", "Off"),
+                    if (AiSettings.suggestCategories(this@SettingsActivity)) 0 else 1) { i ->
+                    AiSettings.setSuggestCategories(this@SettingsActivity, i == 0)
+                }, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(10) })
+                caption(pal, "While you write a new note, a small chip offers a category. Tap it to accept, or ignore it and it fades away. Needs the key below.")
+            }
+            row {
                 title(pal, "OpenRouter key")
                 val key = field("key", "Paste your key", secret = true)
                 addView(key, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(10) })
