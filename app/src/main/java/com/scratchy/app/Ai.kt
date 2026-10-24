@@ -112,6 +112,7 @@ object Ai {
             val reply = chat(ctx, AiSettings.textModel(ctx), JSONArray().put(JSONObject().put("role", "user").put("content", prompt)), 4000, 0.1)
             val out = reply.trim().removePrefix("```markdown").removePrefix("```md").removePrefix("```").removeSuffix("```").trim('\n')
             diff = Markdown.firstDifference(md, out)
+            android.util.Log.i("ScratchyAI", "attempt reply=${reply.length} chars, differs=${diff != null}")
             if (out.isNotBlank() && diff == null) return out
             extra = "Your last answer changed, added or dropped some words. This time keep every single word exactly as written.\n"
         }
