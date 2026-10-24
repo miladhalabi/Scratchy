@@ -162,3 +162,15 @@ The color system (follows the wallpaper, with a fixed-color fallback) and the ne
 ## Project notes
 
 `PLAN.md` is the original design plan. The app has since moved from a notification-based idea to the edge bar and card described above.
+
+## Screenshots without showing your notes
+
+`DemoData.kt` seeds made-up notes, but only when the package name ends in `.demo`. Build a separate copy that installs next to the real app and never touches its data:
+
+```bash
+./gradlew assembleRelease -PappId=com.scratchy.app.demo
+adb install -r app/build/outputs/apk/release/app-release.apk
+adb shell appops set com.scratchy.app.demo SYSTEM_ALERT_WINDOW allow
+```
+
+Screenshots with `adb exec-out screencap -p`, crop the status bar, then `adb uninstall com.scratchy.app.demo`. Rebuild without `-PappId` for the real app. Secret screens block screenshots by design, so the vault itself can't be captured.

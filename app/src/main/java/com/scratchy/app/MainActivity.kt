@@ -49,6 +49,7 @@ class MainActivity : Activity() {
     private var gate: VaultGate? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        DemoData.seedIfDemo(this)
         pal = Palette(this)
         setTheme(
             if (pal.dark) android.R.style.Theme_Material_NoActionBar

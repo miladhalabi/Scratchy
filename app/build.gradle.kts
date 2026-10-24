@@ -8,7 +8,8 @@ android {
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.scratchy.app"
+        // -PappId=com.scratchy.app.demo builds a separate copy that seeds made-up notes (for screenshots).
+        applicationId = (project.findProperty("appId") as String?) ?: "com.scratchy.app"
         minSdk = 26
         targetSdk = 34
         versionCode = 2
