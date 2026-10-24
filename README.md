@@ -16,7 +16,6 @@
 
 <p align="center">
   <a href="#why">Why</a> ·
-  <a href="#the-app">The app</a> ·
   <a href="#features">Features</a> ·
   <a href="#privacy">Privacy</a> ·
   <a href="#install">Install</a> ·
@@ -31,13 +30,15 @@ You are watching a video, reading an article, in the middle of a chat, and an id
 
 Scratchy keeps a thin bar on the edge of your screen. Tap it and a note card opens **right on top of what you are doing**. Type, close, carry on. You never left the app.
 
-## The app
+<!--
+  Your own screenshots go here. Drop the files in docs/screenshots/ and add, for example:
 
-<p align="center">
-  <img src="docs/img/gallery.png" alt="Scratchy screens: the notes grid, the floating card, the category picker and the vault pull-down" width="100%">
-</p>
-
-<sub>Real screenshots from the phone, with made-up demo notes.</sub>
+  ## The app
+  <p align="center">
+    <img src="docs/screenshots/notes.png" width="24%"> <img src="docs/screenshots/card.png" width="24%">
+    <img src="docs/screenshots/categories.png" width="24%"> <img src="docs/screenshots/vault.png" width="24%">
+  </p>
+-->
 
 ## Features
 
