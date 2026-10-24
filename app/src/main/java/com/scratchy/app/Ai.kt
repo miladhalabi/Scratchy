@@ -98,25 +98,32 @@ object Ai {
     private fun requestFormat(ctx: Context, md: String): String {
         var extra = ""
         var diff: Pair<String, String>? = null
-        repeat(2) {
-            val prompt = "You are a formatter. Turn the text below into well-structured Markdown WITHOUT changing its words.\n" +
-                "Rules:\n" +
-                "1. Keep every word, number, name and symbol exactly as written, in the same order and the same language. " +
-                "Never add, remove, translate, correct, summarize or reorder anything. Do not fix typos.\n" +
-                "2. Only add Markdown structure: # and ## headings for titles and section names, - bullet lists, 1. numbered lists for steps, " +
-                "- [ ] for to-do items (and - [x] for ones clearly done), **bold** for key labels, `code` for commands and code, > for quotes, " +
-                "and a Markdown table when the text is clearly tabular.\n" +
-                "3. Keep any Markdown that is already there.\n" +
-                "4. Do not add any new text: no title, no intro, no notes.\n" +
-                "5. Reply with only the Markdown, with no code fence around it.\n$extra\nText:\n$md"
-            val reply = chat(ctx, AiSettings.textModel(ctx), JSONArray().put(JSONObject().put("role", "user").put("content", prompt)), 4000, 0.1)
+        var unchanged = false
+        repeat(3) { attempt ->
+            val prompt = "You are a Markdown formatter. Add Markdown formatting to the text below WITHOUT changing its words.\n" +
+                "You MUST add visible formatting. Returning the text unchanged is a failure.\n" +
+                "Hard rule: keep every word, number, name and symbol exactly as written, in the same order and the same language " +
+                "(Arabic stays Arabic, English words stay English). Never add, remove, translate, correct, summarize or reorder anything, " +
+                "and never invent a title or intro. Do not fix typos.\n" +
+                "What to do with the structure that is already in the text:\n" +
+                "- Each line is its own item. Turn lines that are items of a list into '- ' bullets (or '1. ' for steps), and to-do items into '- [ ] '.\n" +
+                "- Turn a short title-like line (usually the first one) into a '# ' heading, and the name of a section into '## '.\n" +
+                "- Put **bold** on the key terms: technologies, product and company names, English terms, numbers and labels before a colon.\n" +
+                "- Use `code` for commands and code, '> ' for quotes, and a Markdown table when the text is clearly tabular.\n" +
+                "- Put a blank line between groups of lines that belong together.\n" +
+                "- Keep any Markdown that is already there.\n" +
+                "Reply with only the Markdown, with no code fence around it.\n$extra\nText:\n$md"
+            val reply = chat(ctx, AiSettings.textModel(ctx), JSONArray().put(JSONObject().put("role", "user").put("content", prompt)), 4000, 0.2 + attempt * 0.1)
             val out = reply.trim().removePrefix("```markdown").removePrefix("```md").removePrefix("```").removeSuffix("```").trim('\n')
             diff = Markdown.firstDifference(md, out)
-            android.util.Log.i("ScratchyAI", "attempt reply=${reply.length} chars, differs=${diff != null}")
-            if (out.isNotBlank() && diff == null) return out
-            extra = "Your last answer changed, added or dropped some words. This time keep every single word exactly as written.\n"
+            unchanged = out.trim() == md.trim()
+            android.util.Log.i("ScratchyAI", "attempt $attempt reply=${reply.length} chars, differs=${diff != null}, unchanged=$unchanged")
+            if (out.isNotBlank() && diff == null && !unchanged) return out
+            extra = if (unchanged) "Your last answer was the same text with no formatting. This time you MUST add Markdown: bullets, a heading and **bold** key terms.\n"
+            else "Your last answer changed, added or dropped some words. This time keep every single word exactly as written.\n"
         }
-        error("The AI changed the text (“${diff?.first}” became “${diff?.second}”), so your note was left as it was.")
+        error(if (unchanged) "The AI found nothing to format in this note. A stronger model under Settings → AI may do better."
+        else "The AI changed the text (“${diff?.first}” became “${diff?.second}”), so your note was left as it was.")
     }
 
     /** Sends a tiny message to check the key and model. */
