@@ -13,7 +13,7 @@ object NoteJson {
         .put("category", if (n.secret) "" else n.category)
 
     fun from(o: JSONObject) = Note(
-        o.getString("id"), o.optString("title"), o.optString("body"), o.optLong("createdAt"),
+        o.getString("id"), o.optString("title"), Markdown.legacy(o.optString("body")), o.optLong("createdAt"),
         o.optLong("updatedAt"), o.optBoolean("pinned"),
         o.optJSONArray("images")?.let { a -> (0 until a.length()).map { a.getString(it) } } ?: emptyList(),
         o.optBoolean("secret"), o.optLong("rev"), o.optString("category")

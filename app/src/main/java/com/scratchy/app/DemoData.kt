@@ -13,8 +13,8 @@ import java.io.FileOutputStream
  * so the real app and its notes are never touched.
  */
 object DemoData {
-    private const val ON = NoteEditor.BOX_ON
-    private const val OFF = NoteEditor.BOX_OFF
+    private const val ON = "- [x]"
+    private const val OFF = "- [ ]"
 
     fun seedIfDemo(ctx: Context) {
         if (!ctx.packageName.endsWith(".demo") || NoteStore.all(ctx).isNotEmpty()) return

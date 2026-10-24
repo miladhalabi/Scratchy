@@ -33,8 +33,9 @@ An idea shows up while you are watching a video, reading, or mid-chat. Opening a
 - 📌 **Pin it** and the card stays on screen while you carry on using the phone: copy from a page, glance at the card, paste.
 - 🧠 **It remembers.** The card opens on your last note ready to continue, on one permanent scratch note, or on a fresh one. You choose.
 - 📸 **Screenshot? One tap to file it.** The bar turns green the moment you take one. Open the card and choose: add to the current note, start a new note, or pick another note. Or let it attach on its own.
-- ✍️ **A real editor.** Checklists that continue on Enter and toggle with a tap, images inside the note, paste from the clipboard (including images from the keyboard), and its own copy, cut and paste bar, because an overlay window cannot show Android's text menu.
-
+- ✍️ **Markdown, all the way down.** Notes *are* markdown: paste an answer from ChatGPT, Claude or any AI app and it just works. Headings, **bold**, *italics*, `code`, fenced code blocks, quotes, links, tables and rules are drawn as you type (the symbols stay, dimmed, so you can still edit them), and everywhere else, the grid, the card, the previews, they read clean with the symbols hidden. What you copy out is the same markdown you pasted in.
+- ☑️ **Real lists.** `- [ ]` checklists show as checkboxes you tap, bullets and numbered lists continue on Enter and end on an empty line, and Backspace removes a whole list marker in one go. Your old checklist notes convert themselves.
+- 📋 **A real editor, over any app.** Images inside the note, paste from the clipboard (including images from the keyboard), and its own copy, cut and paste bar, because an overlay window cannot show Android's text menu.
 ## 🗂️ Organize
 
 - 🧱 **A card-style notes grid** with pinned notes first, big image previews cropped from the middle, and instant search across titles, text and categories.
@@ -79,7 +80,7 @@ A short menu with one small page per topic, and an *Advanced* fold for the rare 
 
 ## 🧰 Built to last
 
-Plain Kotlin and Android Views, no Compose and no XML layouts. The merge engine is pure Kotlin with 25 unit tests, and the sync format is versioned. About 6,000 lines.
+Plain Kotlin and Android Views, no Compose and no XML layouts. The merge engine and the markdown logic are pure Kotlin with 34 unit tests, and the sync format is versioned. About 6,000 lines.
 
 ## 🔏 Privacy
 

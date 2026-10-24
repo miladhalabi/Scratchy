@@ -61,28 +61,3 @@ class CheckSpan(
 /** Marker spans so they can be found and replaced on every edit. */
 class DoneStrike : StrikethroughSpan()
 class DoneColor(c: Int) : ForegroundColorSpan(c)
-
-object Checklist {
-    const val BOX_OFF = '☐'
-    const val BOX_ON = '☑'
-
-    /** (Re)applies checkbox drawing, and strike-through + dimming for ticked lines. */
-    fun style(s: Spannable, pal: Palette, density: Float) {
-        for (sp in s.getSpans(0, s.length, CheckSpan::class.java)) s.removeSpan(sp)
-        for (sp in s.getSpans(0, s.length, DoneStrike::class.java)) s.removeSpan(sp)
-        for (sp in s.getSpans(0, s.length, DoneColor::class.java)) s.removeSpan(sp)
-        var i = 0
-        while (i < s.length) {
-            val nl = s.indexOf('\n', i).let { if (it < 0) s.length else it }
-            if (nl > i && (s[i] == BOX_OFF || s[i] == BOX_ON)) {
-                val on = s[i] == BOX_ON
-                s.setSpan(CheckSpan(on, pal.accent, pal.onAccent, pal.secondary, density), i, i + 1, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
-                if (on && nl > i + 2) {
-                    s.setSpan(DoneStrike(), i + 2, nl, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
-                    s.setSpan(DoneColor(pal.secondary), i + 2, nl, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
-                }
-            }
-            i = nl + 1
-        }
-    }
-}

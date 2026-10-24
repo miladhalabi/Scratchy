@@ -431,8 +431,7 @@ class MainActivity : Activity() {
             setPadding(dp(16), dp(16), dp(16), dp(14))
             background = roundRect(pal.surface, dp(24).toFloat())
             addView(TextView(this@MainActivity).apply {
-                text = android.text.SpannableString(n.heading.ifEmpty { "Untitled" })
-                    .also { Checklist.style(it, pal, resources.displayMetrics.density) }
+                text = n.heading.ifEmpty { "Untitled" }
                 textSize = 17f; setTextColor(pal.text)
                 typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
                 maxLines = 2; ellipsize = TextUtils.TruncateAt.END
@@ -441,8 +440,7 @@ class MainActivity : Activity() {
             if (n.images.isNotEmpty()) addView(imagePreview(n.images.first(), n.images.size),
                 LinearLayout.LayoutParams(-1, dp(120)).apply { topMargin = dp(10) })
             addView(TextView(this@MainActivity).apply {
-                text = if (body.isNotEmpty()) android.text.SpannableString(body)
-                    .also { Checklist.style(it, pal, resources.displayMetrics.density) } else "No text"
+                text = if (body.isNotEmpty()) Markdown.render(body.take(1500), pal, resources.displayMetrics.density) else "No text"
                 textSize = 15f; setTextColor(pal.secondary)
                 maxLines = 6; ellipsize = TextUtils.TruncateAt.END
                 setPadding(0, dp(10), 0, 0)

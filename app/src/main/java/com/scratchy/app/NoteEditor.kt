@@ -14,9 +14,12 @@ import android.text.TextWatcher
 import android.util.TypedValue
 import android.view.GestureDetector
 import android.view.Gravity
+import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.View
 import android.view.inputmethod.EditorInfo
+import android.view.inputmethod.InputConnection
+import android.view.inputmethod.InputConnectionWrapper
 import android.view.ViewOutlineProvider
 import android.view.ContentInfo
 import android.view.OnReceiveContentListener
@@ -30,7 +33,7 @@ import android.widget.Toast
 import java.io.File
 
 /**
- * Title + multi-line body with autosave and simple checklists (lines starting with ☐ / ☑).
+ * Title + multi-line body with autosave and markdown (lists, `- [ ]` checklists, headings, bold, code, links).
  * Used by both the floating panel and the full-screen note screen.
  */
 class NoteEditor(
@@ -54,6 +57,36 @@ class NoteEditor(
             super.onSelectionChanged(selStart, selEnd)
             selectionChanged(this)
         }
+
+        /** Backspace right after a list marker removes the whole marker ("- ", "1. ", "- [ ] "), not one character of it. */
+        override fun onCreateInputConnection(outAttrs: EditorInfo): InputConnection? {
+            val ic = super.onCreateInputConnection(outAttrs) ?: return null
+            if (this !== bodyEdit) return ic
+            return object : InputConnectionWrapper(ic, true) {
+                override fun deleteSurroundingText(before: Int, after: Int) =
+                    (before == 1 && after == 0 && dropListMarker()) || super.deleteSurroundingText(before, after)
+                override fun sendKeyEvent(ev: KeyEvent) =
+                    (ev.action == KeyEvent.ACTION_DOWN && ev.keyCode == KeyEvent.KEYCODE_DEL && dropListMarker()) || super.sendKeyEvent(ev)
+            }
+        }
+    }
+
+    private fun dropListMarker(): Boolean {
+        val t = bodyEdit.text
+        val c = bodyEdit.selectionStart
+        if (c < 0 || c != bodyEdit.selectionEnd) return false
+        val lineStart = t.lastIndexOf('\n', c - 1) + 1
+        val lineEnd = t.indexOf('\n', lineStart).let { if (it < 0) t.length else it }
+        val item = Markdown.listItem(t.substring(lineStart, lineEnd)) ?: return false
+        if (c != lineStart + item.length) return false
+        t.delete(lineStart + item.indent.length, c)
+        return true
+    }
+
+    private fun insertAtSelection(target: EditText, text: CharSequence) {
+        val a = target.selectionStart.coerceAtLeast(0)
+        val b = target.selectionEnd.coerceAtLeast(0)
+        target.text.replace(minOf(a, b), maxOf(a, b), text)
     }
     val titleEdit: EditText = Edit(ctx)
     val bodyEdit: EditText = Edit(ctx)
@@ -196,24 +229,25 @@ class NoteEditor(
             }
             override fun afterTextChanged(e: Editable?) {
                 e ?: return
-                continueChecklist(e)
-                Checklist.style(e, palette, resources.displayMetrics.density)
+                continueList(e)
+                Markdown.style(e, palette, resources.displayMetrics.density)
             }
         })
 
-        // Tap a ☐ / ☑ to toggle it.
+        // Tap a checkbox to toggle it.
         val detector = GestureDetector(ctx, object : GestureDetector.SimpleOnGestureListener() {
             override fun onSingleTapUp(ev: MotionEvent): Boolean {
                 val text = bodyEdit.text
                 val off = bodyEdit.getOffsetForPosition(ev.x, ev.y)
                 val lineStart = text.lastIndexOf('\n', off - 1) + 1
-                if (off <= lineStart + 1 && lineStart < text.length) {
-                    val c = text[lineStart]
-                    if (c == BOX_OFF || c == BOX_ON) {
-                        editing = true
-                        text.replace(lineStart, lineStart + 1, (if (c == BOX_OFF) BOX_ON else BOX_OFF).toString())
-                        editing = false
-                    }
+                val lineEnd = text.indexOf('\n', lineStart).let { if (it < 0) text.length else it }
+                val line = text.substring(lineStart, lineEnd)
+                val item = Markdown.listItem(line)
+                if (item != null && item.kind == Markdown.Kind.TASK && off < lineStart + item.length) {
+                    editing = true
+                    val at = lineStart + Markdown.checkIndex(line)
+                    text.replace(at, at + 1, if (text[at] == ' ') "x" else " ")
+                    editing = false
                 }
                 return false
             }
@@ -286,37 +320,38 @@ class NoteEditor(
 
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
 
-    /** Enter on a checklist line starts a new item; Enter on an empty item ends the list. */
-    private fun continueChecklist(e: Editable) {
+    /** Enter on a list line (task, bullet or number) starts the next item; Enter on an empty item ends the list. */
+    private fun continueList(e: Editable) {
         val nl = newlineAt
         newlineAt = -1
         if (nl < 0 || editing) return
         val prevStart = e.lastIndexOf('\n', nl - 1) + 1
         val prev = e.substring(prevStart, nl)
-        if (!prev.startsWith("$BOX_OFF ") && !prev.startsWith("$BOX_ON ")) return
+        val item = Markdown.listItem(prev) ?: return
         editing = true
-        if (prev.length == 2) {
+        if (prev.length == item.length) {
             e.delete(prevStart, nl + 1)
             bodyEdit.setSelection(prevStart)
         } else {
-            e.insert(nl + 1, "$BOX_OFF ")
-            bodyEdit.setSelection(nl + 3)
+            val next = item.next()
+            e.insert(nl + 1, next)
+            bodyEdit.setSelection(nl + 1 + next.length)
         }
         editing = false
     }
 
-    /** Adds or removes the checkbox prefix on the line at the cursor. */
+    /** Turns the line at the cursor into a task, or a task back into a plain line. */
     fun toggleChecklist() {
         bodyEdit.requestFocus()
         val text = bodyEdit.text
         val sel = bodyEdit.selectionStart.coerceAtLeast(0)
         val lineStart = text.lastIndexOf('\n', sel - 1) + 1
+        val lineEnd = text.indexOf('\n', lineStart).let { if (it < 0) text.length else it }
+        val line = text.substring(lineStart, lineEnd)
+        val now = Markdown.toggleTaskLine(line)
         editing = true
-        if (text.startsWith("$BOX_OFF ", lineStart) || text.startsWith("$BOX_ON ", lineStart)) {
-            text.delete(lineStart, lineStart + 2)
-        } else {
-            text.insert(lineStart, "$BOX_OFF ")
-        }
+        text.replace(lineStart, lineEnd, now)
+        bodyEdit.setSelection((sel + now.length - line.length).coerceIn(lineStart, lineStart + now.length))
         editing = false
     }
 
@@ -378,9 +413,7 @@ class NoteEditor(
         }
         val target = if (titleEdit.hasFocus()) titleEdit else bodyEdit
         target.requestFocus()
-        val a = target.selectionStart.coerceAtLeast(0)
-        val b = target.selectionEnd.coerceAtLeast(0)
-        target.text.replace(minOf(a, b), maxOf(a, b), text)
+        insertAtSelection(target, text.toString().replace("\r\n", "\n"))
     }
 
     /** Asks the AI for three titles from the text and/or first image, shown as tappable chips. */
@@ -544,8 +577,4 @@ class NoteEditor(
         onChanged(note)
     }
 
-    companion object {
-        const val BOX_OFF = '☐'
-        const val BOX_ON = '☑'
-    }
 }

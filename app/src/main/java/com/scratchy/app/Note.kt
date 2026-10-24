@@ -32,7 +32,10 @@ data class Note(
 
     /** Title, or the first non-blank body line when there is no title. */
     val heading: String
-        get() = title.trim().ifEmpty { body.lineSequence().firstOrNull { it.isNotBlank() }?.trim() ?: "" }
+        get() = title.trim().ifEmpty {
+            val line = body.lineSequence().firstOrNull { it.isNotBlank() }?.trim() ?: ""
+            Markdown.plain(line).ifEmpty { line }
+        }
 
     /** Text shown under the heading in lists. */
     val preview: String
@@ -64,7 +67,7 @@ object NoteStore {
                 title = text?.optString("title") ?: ""; body = text?.optString("body") ?: "(unreadable)"
             }
             Note(
-                o.getString("id"), title, body,
+                o.getString("id"), title, Markdown.legacy(body),
                 o.optLong("createdAt"), o.optLong("updatedAt"), o.optBoolean("pinned"),
                 o.optJSONArray("images")?.let { a -> (0 until a.length()).map { a.getString(it) } }
                     ?: emptyList(),

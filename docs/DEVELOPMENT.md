@@ -113,6 +113,7 @@ Then set `BASE` in `app/src/main/java/com/scratchy/app/Live.kt` to your Worker U
 | `SyncData.kt` | Note JSON format and per-note sync state |
 | `Live.kt` | WebSocket connection to the relay |
 | `SyncWorker.kt` | 15-minute background sync |
+| `Markdown.kt` | Notes are markdown: list/checkbox logic, `legacy()` for old ☐/☑ notes, `style()` while editing, `render()` for reading |
 | `Categories.kt`, `Dialogs.kt` | Categories (names, AI sorting, pickers) and the app's own dialog card |
 | `Ai.kt`, `Attachments.kt`, `Screenshots.kt`, `Checklist.kt`, `HoldToDelete.kt`, `Appearance.kt`, `CardNote.kt`, `Ui.kt` | Supporting pieces |
 
