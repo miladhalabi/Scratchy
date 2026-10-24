@@ -58,29 +58,43 @@ class NoteEditor(
             selectionChanged(this)
         }
 
-        /** Backspace right after a list marker removes the whole marker ("- ", "1. ", "- [ ] "), not one character of it. */
+        /** Backspace at the start of a list item, quote or heading removes that format instead of joining lines. */
         override fun onCreateInputConnection(outAttrs: EditorInfo): InputConnection? {
             val ic = super.onCreateInputConnection(outAttrs) ?: return null
             if (this !== bodyEdit) return ic
             return object : InputConnectionWrapper(ic, true) {
                 override fun deleteSurroundingText(before: Int, after: Int) =
-                    (before == 1 && after == 0 && dropListMarker()) || super.deleteSurroundingText(before, after)
+                    (before == 1 && after == 0 && dropFormat()) || super.deleteSurroundingText(before, after)
                 override fun sendKeyEvent(ev: KeyEvent) =
-                    (ev.action == KeyEvent.ACTION_DOWN && ev.keyCode == KeyEvent.KEYCODE_DEL && dropListMarker()) || super.sendKeyEvent(ev)
+                    (ev.action == KeyEvent.ACTION_DOWN && ev.keyCode == KeyEvent.KEYCODE_DEL && dropFormat()) || super.sendKeyEvent(ev)
             }
+        }
+
+        /** Pasted text goes through the markdown reader, so an answer from an AI app arrives formatted. */
+        override fun onTextContextMenuItem(id: Int): Boolean {
+            if (this === bodyEdit && (id == android.R.id.paste || id == android.R.id.pasteAsPlainText)) {
+                val clip = context.getSystemService(ClipboardManager::class.java).primaryClip
+                if (clip != null && clip.itemCount > 0 && !clip.description.hasMimeType("image/*")) {
+                    val text = clip.getItemAt(0).coerceToText(context)?.toString().orEmpty()
+                    if (text.isNotEmpty()) { pasteMarkdown(text); return true }
+                }
+            }
+            return super.onTextContextMenuItem(id)
         }
     }
 
-    private fun dropListMarker(): Boolean {
-        val t = bodyEdit.text
+    private fun dropFormat(): Boolean {
         val c = bodyEdit.selectionStart
         if (c < 0 || c != bodyEdit.selectionEnd) return false
-        val lineStart = t.lastIndexOf('\n', c - 1) + 1
-        val lineEnd = t.indexOf('\n', lineStart).let { if (it < 0) t.length else it }
-        val item = Markdown.listItem(t.substring(lineStart, lineEnd)) ?: return false
-        if (c != lineStart + item.length) return false
-        t.delete(lineStart + item.indent.length, c)
-        return true
+        val done = RichText.backspaceAtStart(bodyEdit.text, c)
+        if (done) { scheduleSave(); refreshFormat(); bodyEdit.invalidate() }
+        return done
+    }
+
+    private fun pasteMarkdown(text: String) {
+        val a = bodyEdit.selectionStart.coerceAtLeast(0)
+        val b = bodyEdit.selectionEnd.coerceAtLeast(0)
+        RichText.insertMarkdown(bodyEdit.text, minOf(a, b), maxOf(a, b), text, palette, resources.displayMetrics.density)
     }
 
     private fun insertAtSelection(target: EditText, text: CharSequence) {
@@ -121,6 +135,16 @@ class NoteEditor(
     private var suppress = false
     private var editing = false
     private var newlineAt = -1
+    private var chStart = 0
+    private var chBefore = 0
+    private var chCount = 0
+    /** The markdown the body had when it was last loaded or saved. Lets an untouched note keep its exact original text. */
+    private var canon = ""
+    private val formatScroll = HorizontalScrollView(ctx)
+    private val formatRow = LinearLayout(ctx)
+    private val formatButtons = LinkedHashMap<String, TextView>()
+    private val linkRow = LinearLayout(ctx)
+    private val linkField = EditText(ctx)
 
     init {
         orientation = VERTICAL
@@ -160,6 +184,9 @@ class NoteEditor(
         }, LayoutParams(-1, -2))
         addView(View(ctx).apply { setBackgroundColor(pal.hairline) },
             LayoutParams(-1, 1).apply { marginStart = dp(4); marginEnd = dp(4) })
+        buildFormatBar(ctx, pal)
+        addView(formatScroll, LayoutParams(-1, -2))
+        addView(linkRow, LayoutParams(-1, -2))
         addView(menuRow, LayoutParams(-1, -2))
         menuItem("Select all") { target().selectAll() }
         menuCut; menuCopy
@@ -225,29 +252,31 @@ class NoteEditor(
         bodyEdit.addTextChangedListener(object : TextWatcher {
             override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
+                chStart = start; chBefore = before; chCount = count
                 newlineAt = if (!suppress && !editing && before == 0 && count == 1 && s?.get(start) == '\n') start else -1
             }
             override fun afterTextChanged(e: Editable?) {
-                e ?: return
-                continueList(e)
-                Markdown.style(e, palette, resources.displayMetrics.density)
+                if (e == null || suppress || editing) return
+                editing = true
+                RichText.afterEdit(e, palette, resources.displayMetrics.density, newlineAt, chStart, chCount, chBefore == 0) {
+                    bodyEdit.setSelection(it.coerceIn(0, e.length))
+                }
+                editing = false
+                newlineAt = -1
+                refreshFormat()
             }
         })
 
-        // Tap a checkbox to toggle it.
+        // Tap a task's checkbox to toggle it.
         val detector = GestureDetector(ctx, object : GestureDetector.SimpleOnGestureListener() {
             override fun onSingleTapUp(ev: MotionEvent): Boolean {
+                val layout = bodyEdit.layout ?: return false
                 val text = bodyEdit.text
-                val off = bodyEdit.getOffsetForPosition(ev.x, ev.y)
-                val lineStart = text.lastIndexOf('\n', off - 1) + 1
-                val lineEnd = text.indexOf('\n', lineStart).let { if (it < 0) text.length else it }
-                val line = text.substring(lineStart, lineEnd)
-                val item = Markdown.listItem(line)
-                if (item != null && item.kind == Markdown.Kind.TASK && off < lineStart + item.length) {
-                    editing = true
-                    val at = lineStart + Markdown.checkIndex(line)
-                    text.replace(at, at + 1, if (text[at] == ' ') "x" else " ")
-                    editing = false
+                val line = layout.getLineForVertical((ev.y + bodyEdit.scrollY - bodyEdit.totalPaddingTop).toInt())
+                val off = layout.getLineStart(line)
+                val margin = RichText.taskMarginAt(text, off) ?: return false
+                if (RichText.paraStart(text, off) == off && ev.x < bodyEdit.totalPaddingLeft + margin) {
+                    if (RichText.toggleTaskAt(text, off)) { scheduleSave(); bodyEdit.invalidate() }
                 }
                 return false
             }
@@ -299,6 +328,7 @@ class NoteEditor(
     }
 
     private fun selectionChanged(v: EditText) {
+        if (ready && v === bodyEdit) refreshFormat()
         if (!ready || !compactMode) return
         menuTarget = v
         if (v.selectionStart != v.selectionEnd) showMenu()
@@ -320,39 +350,12 @@ class NoteEditor(
 
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
 
-    /** Enter on a list line (task, bullet or number) starts the next item; Enter on an empty item ends the list. */
-    private fun continueList(e: Editable) {
-        val nl = newlineAt
-        newlineAt = -1
-        if (nl < 0 || editing) return
-        val prevStart = e.lastIndexOf('\n', nl - 1) + 1
-        val prev = e.substring(prevStart, nl)
-        val item = Markdown.listItem(prev) ?: return
-        editing = true
-        if (prev.length == item.length) {
-            e.delete(prevStart, nl + 1)
-            bodyEdit.setSelection(prevStart)
-        } else {
-            val next = item.next()
-            e.insert(nl + 1, next)
-            bodyEdit.setSelection(nl + 1 + next.length)
-        }
-        editing = false
-    }
-
-    /** Turns the line at the cursor into a task, or a task back into a plain line. */
+    /** The checklist button in the note screen and the card: makes the selected lines tasks, or plain again. */
     fun toggleChecklist() {
         bodyEdit.requestFocus()
-        val text = bodyEdit.text
-        val sel = bodyEdit.selectionStart.coerceAtLeast(0)
-        val lineStart = text.lastIndexOf('\n', sel - 1) + 1
-        val lineEnd = text.indexOf('\n', lineStart).let { if (it < 0) text.length else it }
-        val line = text.substring(lineStart, lineEnd)
-        val now = Markdown.toggleTaskLine(line)
-        editing = true
-        text.replace(lineStart, lineEnd, now)
-        bodyEdit.setSelection((sel + now.length - line.length).coerceIn(lineStart, lineStart + now.length))
-        editing = false
+        val (a, b) = selection()
+        RichText.setList(bodyEdit.text, a, b, Markdown.Kind.TASK, palette, resources.displayMetrics.density)
+        afterFormat()
     }
 
     /**
@@ -361,7 +364,7 @@ class NoteEditor(
      */
     fun refreshFrom(n: Note) {
         if (n.id != note.id) return
-        if (titleEdit.text.toString() != note.title || bodyEdit.text.toString() != note.body) return   // unsaved typing wins
+        if (titleEdit.text.toString() != note.title || RichText.toMarkdown(bodyEdit.text) != canon) return   // unsaved typing wins
         if (n.sameContent(note)) { note = n; return }                      // nothing to show, just catch up the counters
         if (n.rev < note.rev || (n.rev == note.rev && n.updatedAt <= note.updatedAt)) return
         val sel = bodyEdit.selectionStart.coerceAtLeast(0)
@@ -376,7 +379,8 @@ class NoteEditor(
         note = n
         images.clear(); images.addAll(n.images)
         titleEdit.setText(n.title)
-        bodyEdit.setText(n.body)
+        bodyEdit.setText(RichText.fromMarkdown(n.body, palette, resources.displayMetrics.density), TextView.BufferType.EDITABLE)
+        canon = RichText.toMarkdown(bodyEdit.text)
         bodyEdit.setSelection(bodyEdit.text.length)
         suppress = false
         renderImages()
@@ -413,7 +417,121 @@ class NoteEditor(
         }
         val target = if (titleEdit.hasFocus()) titleEdit else bodyEdit
         target.requestFocus()
-        insertAtSelection(target, text.toString().replace("\r\n", "\n"))
+        if (target === bodyEdit) pasteMarkdown(text.toString()) else insertAtSelection(target, text.toString().replace("\r\n", "\n"))
+    }
+
+    // ---- formatting bar ----
+
+    private fun selection(): Pair<Int, Int> {
+        val a = bodyEdit.selectionStart.coerceAtLeast(0)
+        val b = bodyEdit.selectionEnd.coerceAtLeast(0)
+        return minOf(a, b) to maxOf(a, b)
+    }
+
+    private fun scheduleSave() { handler.removeCallbacks(autosave); handler.postDelayed(autosave, 500) }
+
+    private fun afterFormat() { scheduleSave(); refreshFormat(); bodyEdit.invalidate() }
+
+    private fun button(key: String, label: CharSequence, onTap: () -> Unit) {
+        formatButtons[key] = TextView(context).apply {
+            text = label; setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f); gravity = Gravity.CENTER
+            setTextColor(palette.text)
+            minWidth = dp(38)
+            setPadding(dp(8), 0, dp(8), 0)
+            pressable(0.92f) { bodyEdit.requestFocus(); onTap() }
+        }
+        formatRow.addView(formatButtons[key], LayoutParams(-2, dp(34)).apply { marginEnd = dp(4) })
+    }
+
+    private fun buildFormatBar(ctx: Context, pal: Palette) {
+        val density = resources.displayMetrics.density
+        fun text(kind: Inline) { val (a, b) = selection(); RichText.toggleInline(bodyEdit.text, kind, a, b, palette); afterFormat() }
+        fun style(s: CharSequence, what: Any) = android.text.SpannableString(s).apply { setSpan(what, 0, length, 0) }
+        button("bold", style("B", android.text.style.StyleSpan(android.graphics.Typeface.BOLD))) { text(Inline.BOLD) }
+        button("italic", style("I", android.text.style.StyleSpan(android.graphics.Typeface.ITALIC))) { text(Inline.ITALIC) }
+        button("strike", style("S", android.text.style.StrikethroughSpan())) { text(Inline.STRIKE) }
+        button("code", "</>") { text(Inline.CODE) }
+        button("heading", "H") {
+            val (a, b) = selection()
+            val cur = (RichText.kindAt(bodyEdit.text, a) as? RHeading)?.level ?: 0
+            // H -> H1 -> H2 -> H3 -> plain again (setHeading with the level it already has clears it)
+            RichText.setHeading(bodyEdit.text, a, b, if (cur == 0) 1 else if (cur < 3) cur + 1 else cur)
+            afterFormat()
+        }
+        button("bullet", "•") { val (a, b) = selection(); RichText.setList(bodyEdit.text, a, b, Markdown.Kind.BULLET, palette, density); afterFormat() }
+        button("number", "1.") { val (a, b) = selection(); RichText.setList(bodyEdit.text, a, b, Markdown.Kind.NUMBER, palette, density); afterFormat() }
+        button("task", "☑") { val (a, b) = selection(); RichText.setList(bodyEdit.text, a, b, Markdown.Kind.TASK, palette, density); afterFormat() }
+        button("quote", "❝") { val (a, b) = selection(); RichText.setQuote(bodyEdit.text, a, b, palette, density); afterFormat() }
+        button("block", "{ }") { val (a, b) = selection(); RichText.setCode(bodyEdit.text, a, b, palette); afterFormat() }
+        button("link", "🔗") { showLinkRow() }
+        button("out", "⇤") { val (a, b) = selection(); RichText.shift(bodyEdit.text, a, b, -1); afterFormat() }
+        button("in", "⇥") { val (a, b) = selection(); RichText.shift(bodyEdit.text, a, b, 1); afterFormat() }
+        formatScroll.apply {
+            isHorizontalScrollBarEnabled = false
+            setPadding(dp(2), dp(6), dp(2), dp(2))
+            addView(formatRow)
+        }
+        linkRow.apply {
+            visibility = View.GONE; gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(2), dp(6), dp(2), dp(2))
+            linkField.apply {
+                hint = "https://…"; setSingleLine(true); setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
+                inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
+                setTextColor(pal.text); setHintTextColor(pal.secondary)
+                setPadding(dp(12), dp(8), dp(12), dp(8))
+                background = roundRect(pal.track, dp(12).toFloat())
+                setOnTouchListener { v, ev -> if (ev.actionMasked == MotionEvent.ACTION_DOWN) onTouched?.invoke(v); false }
+            }
+            addView(linkField, LayoutParams(0, -2, 1f))
+            addView(TextView(ctx).apply {
+                text = "Add"; setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f); gravity = Gravity.CENTER
+                setTextColor(pal.onAccent); setPadding(dp(16), 0, dp(16), 0)
+                background = roundRect(pal.accent, dp(18).toFloat())
+                pressable(0.95f) { applyLink() }
+            }, LayoutParams(-2, dp(36)).apply { marginStart = dp(6) })
+        }
+    }
+
+    private var linkRange = 0 to 0
+
+    private fun showLinkRow() {
+        linkRange = selection()
+        linkField.setText(RichText.linkAt(bodyEdit.text, linkRange.first, linkRange.second).orEmpty())
+        linkRow.visibility = View.VISIBLE
+        linkField.requestFocus()
+    }
+
+    private fun applyLink() {
+        val (a, b) = linkRange
+        val url = linkField.text.toString().trim().let { if (it.isNotEmpty() && !it.contains("://") && !it.startsWith("mailto:")) "https://$it" else it }
+        RichText.setLink(bodyEdit.text, a.coerceAtMost(bodyEdit.text.length), b.coerceAtMost(bodyEdit.text.length), url, palette)
+        linkRow.visibility = View.GONE
+        bodyEdit.requestFocus()
+        afterFormat()
+    }
+
+    /** Lights up the buttons for whatever the cursor or selection is in. */
+    private fun refreshFormat() {
+        if (formatButtons.isEmpty()) return
+        val (a, b) = selection()
+        val t = bodyEdit.text
+        val kind = RichText.kindAt(t, a)
+        fun on(key: String, active: Boolean) {
+            val v = formatButtons[key] ?: return
+            v.setTextColor(if (active) palette.onAccent else palette.text)
+            v.background = if (active) roundRect(palette.accent, dp(10).toFloat()) else null
+        }
+        on("bold", RichText.isActive(t, Inline.BOLD, a, b)); on("italic", RichText.isActive(t, Inline.ITALIC, a, b))
+        on("strike", RichText.isActive(t, Inline.STRIKE, a, b)); on("code", RichText.isActive(t, Inline.CODE, a, b))
+        on("heading", kind is RHeading); formatButtons["heading"]?.text = if (kind is RHeading) "H${kind.level}" else "H"
+        on("bullet", kind is RList && kind.kind == Markdown.Kind.BULLET)
+        on("number", kind is RList && kind.kind == Markdown.Kind.NUMBER)
+        on("task", kind is RList && kind.kind == Markdown.Kind.TASK)
+        on("quote", kind is RQuote); on("block", kind is RCode)
+        on("link", RichText.linkAt(t, a, b) != null)
+        val inList = kind is RList
+        formatButtons["out"]?.visibility = if (inList) View.VISIBLE else View.GONE
+        formatButtons["in"]?.visibility = if (inList) View.VISIBLE else View.GONE
     }
 
     /** Asks the AI for three titles from the text and/or first image, shown as tappable chips. */
@@ -571,9 +689,11 @@ class NoteEditor(
     fun commit() {
         handler.removeCallbacks(autosave)
         val t = titleEdit.text.toString()
-        val b = bodyEdit.text.toString()
-        if (t == note.title && b == note.body && images == note.images) return
-        note = note.copy(title = t, body = b, images = images.toList(), updatedAt = System.currentTimeMillis())
+        val md = RichText.toMarkdown(bodyEdit.text)
+        val bodyChanged = md != canon
+        if (t == note.title && !bodyChanged && images == note.images) return
+        canon = md
+        note = note.copy(title = t, body = if (bodyChanged) md else note.body, images = images.toList(), updatedAt = System.currentTimeMillis())
         onChanged(note)
     }
 

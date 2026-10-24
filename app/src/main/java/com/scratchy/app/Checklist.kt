@@ -29,32 +29,38 @@ class CheckSpan(
         x: Float, top: Int, y: Int, bottom: Int, p: Paint,
     ) {
         val s = p.textSize * 0.95f
-        val cy = y - p.textSize * 0.32f           // visually centred on lowercase letters
-        val left = x + p.textSize * 0.04f
-        box.set(left, cy - s / 2, left + s, cy + s / 2)
-        val r = s * 0.3f
-        if (checked) {
-            paint.style = Paint.Style.FILL
-            paint.color = accent
-            canvas.drawRoundRect(box, r, r, paint)
-            paint.style = Paint.Style.STROKE
-            paint.color = onAccent
-            paint.strokeWidth = s * 0.14f
-            paint.strokeCap = Paint.Cap.ROUND
-            paint.strokeJoin = Paint.Join.ROUND
-            tick.reset()
-            tick.moveTo(box.left + s * 0.26f, box.top + s * 0.54f)
-            tick.lineTo(box.left + s * 0.43f, box.top + s * 0.70f)
-            tick.lineTo(box.left + s * 0.76f, box.top + s * 0.32f)
-            canvas.drawPath(tick, paint)
-        } else {
-            paint.style = Paint.Style.STROKE
-            paint.color = outline
-            paint.strokeWidth = 1.7f * density
-            val inset = paint.strokeWidth / 2
-            box.inset(inset, inset)
-            canvas.drawRoundRect(box, r, r, paint)
-        }
+        drawCheckbox(canvas, paint, box, tick, x + p.textSize * 0.04f, y - p.textSize * 0.32f, s, checked, accent, onAccent, outline, density)
+    }
+}
+
+/** A rounded checkbox with its left edge at [left] and its centre at [cy]. Shared by the editor and the read-only views. */
+fun drawCheckbox(
+    canvas: Canvas, paint: Paint, box: RectF, tick: Path, left: Float, cy: Float, s: Float,
+    checked: Boolean, accent: Int, onAccent: Int, outline: Int, density: Float,
+) {
+    box.set(left, cy - s / 2, left + s, cy + s / 2)
+    val r = s * 0.3f
+    if (checked) {
+        paint.style = Paint.Style.FILL
+        paint.color = accent
+        canvas.drawRoundRect(box, r, r, paint)
+        paint.style = Paint.Style.STROKE
+        paint.color = onAccent
+        paint.strokeWidth = s * 0.14f
+        paint.strokeCap = Paint.Cap.ROUND
+        paint.strokeJoin = Paint.Join.ROUND
+        tick.reset()
+        tick.moveTo(box.left + s * 0.26f, box.top + s * 0.54f)
+        tick.lineTo(box.left + s * 0.43f, box.top + s * 0.70f)
+        tick.lineTo(box.left + s * 0.76f, box.top + s * 0.32f)
+        canvas.drawPath(tick, paint)
+    } else {
+        paint.style = Paint.Style.STROKE
+        paint.color = outline
+        paint.strokeWidth = 1.7f * density
+        val inset = paint.strokeWidth / 2
+        box.inset(inset, inset)
+        canvas.drawRoundRect(box, r, r, paint)
     }
 }
 

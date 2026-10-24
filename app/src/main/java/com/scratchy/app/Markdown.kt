@@ -26,20 +26,9 @@ class MdUnderline : UnderlineSpan(), Md
 class MdStrike : StrikethroughSpan(), Md
 class MdCodeBg(c: Int) : BackgroundColorSpan(c), Md
 
-/** Draws a round bullet in place of the "-" / "*" / "+" that starts a list item. */
-class MdBullet(private val color: Int) : ReplacementSpan(), Md {
-    private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
-    override fun getSize(p: Paint, text: CharSequence?, start: Int, end: Int, fm: Paint.FontMetricsInt?) = (p.textSize * 0.8f).toInt()
-    override fun draw(c: Canvas, text: CharSequence?, start: Int, end: Int, x: Float, top: Int, y: Int, bottom: Int, p: Paint) {
-        paint.color = color
-        c.drawCircle(x + p.textSize * 0.28f, y - p.textSize * 0.3f, p.textSize * 0.11f, paint)
-    }
-}
-
 /**
  * Notes are markdown. The text stored (and synced, and copied out) is exactly what was typed or pasted.
- * [style] draws it while you edit (markers stay, dimmed); [render] draws it for reading (markers hidden).
- * Everything above [style] is pure Kotlin and unit tested.
+ * [render] draws it for reading (grid and previews); [RichText] is the editor. The list and plain-text helpers here are pure Kotlin.
  */
 object Markdown {
     // ---- lists ----
@@ -106,114 +95,28 @@ object Markdown {
 
     // ---- plain text of one line (note headings, pickers) ----
 
-    private val heading = Regex("^(#{1,6})(\\s+)(.*)$")
-    private val bold = Regex("\\*\\*(?=\\S)(.+?)(?<=\\S)\\*\\*")
-    private val italic = Regex("(?<![*\\w])\\*(?=[^\\s*])([^*\\n]+?)(?<=[^\\s*])\\*(?![*\\w])")
-    private val strike = Regex("~~(?=\\S)(.+?)(?<=\\S)~~")
-    private val code = Regex("`([^`\\n]+)`")
-    private val link = Regex("\\[([^\\]\\n]+)]\\(([^)\\s]+)\\)")
-    private val rule = Regex("^\\s*([-*_])(\\s*\\1){2,}\\s*$")
-    private val tableRow = Regex("^\\s*\\|.*\\|\\s*$")
-    private val tableSep = Regex("^\\s*\\|?\\s*:?-{3,}:?\\s*(\\|\\s*:?-{3,}:?\\s*)*\\|?\\s*$")
+    internal val heading = Regex("^(#{1,6})(\\s+)(.*)$")
+    internal val boldItalic = Regex("\\*\\*\\*(?=\\S)(.+?)(?<=\\S)\\*\\*\\*")
+    internal val bold = Regex("\\*\\*(?=\\S)(.+?)(?<=\\S)\\*\\*")
+    internal val italic = Regex("(?<![*\\w])\\*(?=[^\\s*])([^*\\n]+?)(?<=[^\\s*])\\*(?![*\\w])")
+    internal val strike = Regex("~~(?=\\S)(.+?)(?<=\\S)~~")
+    internal val code = Regex("`([^`\\n]+)`")
+    internal val link = Regex("\\[([^\\]\\n]+)]\\(([^)\\s]+)\\)")
+    internal val rule = Regex("^\\s*([-*_])(\\s*\\1){2,}\\s*$")
+    internal val tableRow = Regex("^\\s*\\|.*\\|\\s*$")
+    internal val tableSep = Regex("^\\s*\\|?\\s*:?-{3,}:?\\s*(\\|\\s*:?-{3,}:?\\s*)*\\|?\\s*$")
 
     fun plain(line: String): String {
         var t = line.trim()
         heading.find(t)?.let { t = it.groupValues[3] }
         listItem(t)?.let { t = t.substring(it.length) }
         t = t.replace(Regex("^>\\s?"), "")
-        t = link.replace(t, "$1"); t = bold.replace(t, "$1"); t = strike.replace(t, "$1")
+        t = link.replace(t, "$1"); t = boldItalic.replace(t, "$1"); t = bold.replace(t, "$1"); t = strike.replace(t, "$1")
         t = code.replace(t, "$1"); t = italic.replace(t, "$1")
         return t.trim()
     }
 
-    // ---- editing: styled, markers kept ----
-
     private val levelSize = floatArrayOf(1.4f, 1.25f, 1.12f, 1.05f, 1f, 1f)
-
-    fun style(s: Spannable, pal: Palette, density: Float) {
-        for (sp in s.getSpans(0, s.length, Md::class.java)) s.removeSpan(sp)
-        for (sp in s.getSpans(0, s.length, CheckSpan::class.java)) s.removeSpan(sp)
-        for (sp in s.getSpans(0, s.length, DoneStrike::class.java)) s.removeSpan(sp)
-        for (sp in s.getSpans(0, s.length, DoneColor::class.java)) s.removeSpan(sp)
-        val dim = (pal.secondary and 0xFFFFFF) or 0x99000000.toInt()
-        val codeBg = (pal.secondary and 0xFFFFFF) or 0x26000000
-        fun span(what: Any, from: Int, to: Int) { if (to > from) s.setSpan(what, from, to, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE) }
-
-        fun inline(line: String, base: Int) {
-            for (m in code.findAll(line)) {
-                span(MdMono(), base + m.range.first, base + m.range.last + 1)
-                span(MdCodeBg(codeBg), base + m.range.first, base + m.range.last + 1)
-                span(MdDim(dim), base + m.range.first, base + m.range.first + 1)
-                span(MdDim(dim), base + m.range.last, base + m.range.last + 1)
-            }
-            for (m in bold.findAll(line)) {
-                span(MdBold(), base + m.range.first, base + m.range.last + 1)
-                span(MdDim(dim), base + m.range.first, base + m.range.first + 2)
-                span(MdDim(dim), base + m.range.last - 1, base + m.range.last + 1)
-            }
-            for (m in italic.findAll(line)) {
-                span(MdItalic(), base + m.range.first, base + m.range.last + 1)
-                span(MdDim(dim), base + m.range.first, base + m.range.first + 1)
-                span(MdDim(dim), base + m.range.last, base + m.range.last + 1)
-            }
-            for (m in strike.findAll(line)) {
-                span(MdStrike(), base + m.range.first, base + m.range.last + 1)
-                span(MdDim(dim), base + m.range.first, base + m.range.first + 2)
-                span(MdDim(dim), base + m.range.last - 1, base + m.range.last + 1)
-            }
-            for (m in link.findAll(line)) {
-                val text = m.groups[1]!!.range
-                span(MdLink(pal.accent), base + text.first, base + text.last + 1)
-                span(MdUnderline(), base + text.first, base + text.last + 1)
-                span(MdDim(dim), base + m.range.first, base + text.first)
-                span(MdDim(dim), base + text.last + 1, base + m.range.last + 1)
-            }
-        }
-
-        var fenced = false
-        var i = 0
-        while (i <= s.length) {
-            val nl = s.indexOf('\n', i).let { if (it < 0) s.length else it }
-            val line = s.substring(i, nl)
-            when {
-                line.trimStart().startsWith("```") -> { fenced = !fenced; span(MdDim(dim), i, nl) }
-                fenced -> { span(MdMono(), i, nl); span(MdCodeBg(codeBg), i, nl) }
-                rule.matches(line) -> span(MdDim(dim), i, nl)
-                tableRow.matches(line) -> { span(MdMono(), i, nl); inline(line, i) }
-                else -> {
-                    val h = heading.find(line)
-                    if (h != null) {
-                        val level = h.groupValues[1].length
-                        val markerEnd = i + h.groupValues[1].length + h.groupValues[2].length
-                        span(MdDim(dim), i, markerEnd)
-                        span(MdBold(), markerEnd, nl)
-                        span(MdSize(levelSize[level - 1]), markerEnd, nl)
-                        inline(line.substring(markerEnd - i), markerEnd)
-                    } else {
-                        if (line.startsWith(">")) span(MdDim(dim), i, i + 1)
-                        val li = listItem(line)
-                        if (li != null) {
-                            val at = i + li.indent.length
-                            when (li.kind) {
-                                Kind.TASK -> {
-                                    val closeAt = i + line.indexOf(']', li.indent.length)
-                                    span(CheckSpan(li.checked, pal.accent, pal.onAccent, pal.secondary, density), at, closeAt + 1)
-                                    if (li.checked && nl > i + li.length) {
-                                        span(DoneStrike(), i + li.length, nl)
-                                        span(DoneColor(pal.secondary), i + li.length, nl)
-                                    }
-                                }
-                                Kind.BULLET -> span(MdBullet(pal.secondary), at, at + 1)
-                                Kind.NUMBER -> span(MdDim(dim), at, i + li.length - 1)
-                            }
-                        }
-                        inline(line, i)
-                    }
-                }
-            }
-            i = nl + 1
-        }
-    }
 
     // ---- reading: rendered, markers hidden ----
 
@@ -229,7 +132,7 @@ object Markdown {
             while (pos < src.length) {
                 var best: MatchResult? = null
                 var kind = 0
-                for ((k, re) in listOf(1 to code, 2 to bold, 3 to strike, 4 to italic, 5 to link)) {
+                for ((k, re) in listOf(1 to code, 8 to boldItalic, 2 to bold, 3 to strike, 4 to italic, 5 to link)) {
                     val m = re.find(src, pos) ?: continue
                     if (best == null || m.range.first < best.range.first) { best = m; kind = k }
                 }
@@ -240,6 +143,7 @@ object Markdown {
                     1 -> { sb.append(best.groupValues[1]); span(MdMono(), start, sb.length); span(MdCodeBg(codeBg), start, sb.length) }
                     2 -> { inline(best.groupValues[1]); span(MdBold(), start, sb.length) }
                     3 -> { inline(best.groupValues[1]); span(MdStrike(), start, sb.length) }
+                    8 -> { inline(best.groupValues[1]); span(MdBold(), start, sb.length); span(MdItalic(), start, sb.length) }
                     4 -> { inline(best.groupValues[1]); span(MdItalic(), start, sb.length) }
                     else -> { inline(best.groupValues[1]); span(MdLink(pal.accent), start, sb.length); span(MdUnderline(), start, sb.length) }
                 }
