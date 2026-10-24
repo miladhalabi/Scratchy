@@ -65,8 +65,9 @@ class Sheet(private val a: Activity, private val pal: Palette = Palette(a)) {
         d.requestWindowFeature(Window_NO_TITLE)
         val card = LinearLayout(a).apply {
             orientation = LinearLayout.VERTICAL
-            background = roundRect(pal.surface, a.dp(28).toFloat())
-            setPadding(a.dp(22), a.dp(22), a.dp(22), a.dp(14))
+            background = roundRect(androidx.core.graphics.ColorUtils.blendARGB(pal.surface, pal.text, 0.07f), a.dp(28).toFloat(),
+                (pal.text and 0x00FFFFFF) or 0x24000000, a.dp(1))
+            setPadding(a.dp(22), a.dp(22), a.dp(22), a.dp(10))
             elevation = a.dp(12).toFloat()
         }
         card.addView(TextView(a).apply {
@@ -88,8 +89,7 @@ class Sheet(private val a: Activity, private val pal: Palette = Palette(a)) {
             items.forEach { it ->
                 list.addView(LinearLayout(a).apply {
                     gravity = Gravity.CENTER_VERTICAL
-                    setPadding(a.dp(14), 0, a.dp(14), 0)
-                    background = roundRect(Color.TRANSPARENT, a.dp(14).toFloat())
+                    setPadding(0, 0, a.dp(4), 0)
                     addView(TextView(a).apply {
                         text = it.label; textSize = 16f; maxLines = 1
                         ellipsize = android.text.TextUtils.TruncateAt.END
@@ -128,7 +128,7 @@ class Sheet(private val a: Activity, private val pal: Palette = Palette(a)) {
                 pressable(0.95f) { d.dismiss(); onConfirm?.invoke(fields.map { it.text.toString() }) }
             }, LinearLayout.LayoutParams(-2, a.dp(44)).apply { marginStart = a.dp(6) })
         }
-        if (buttons.childCount > 0) card.addView(buttons, LinearLayout.LayoutParams(-1, -2).apply { topMargin = a.dp(14) })
+        if (buttons.childCount > 0) card.addView(buttons, LinearLayout.LayoutParams(-1, -2).apply { topMargin = a.dp(2) })
         else card.setPadding(a.dp(22), a.dp(22), a.dp(22), a.dp(16))
 
         val width = minOf(a.resources.displayMetrics.widthPixels - a.dp(48), a.dp(400))
