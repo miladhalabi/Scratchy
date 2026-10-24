@@ -1,14 +1,39 @@
-# Scratchy
+<p align="center">
+  <img src="docs/img/hero.svg" alt="Scratchy: a note card that floats over any app" width="100%">
+</p>
 
-**A note card that floats over any app.**
+<p align="center">
+  <b>Tap the edge of your screen. Write the idea. Close it.</b><br>
+  A personal Android notes app, fast first, private second.
+</p>
 
-You are watching a video, reading an article, in the middle of a chat, and an idea shows up. Tap the thin bar on the edge of your screen, a note card opens right there on top of what you are doing, you type the idea, close it, and carry on. You never left the app.
+<p align="center">
+  <img alt="Android 8.0+" src="https://img.shields.io/badge/Android-8.0%2B-3ddc84?style=flat-square&logo=android&logoColor=white">
+  <img alt="Kotlin" src="https://img.shields.io/badge/Kotlin-no%20Compose%2C%20no%20XML-7f52ff?style=flat-square&logo=kotlin&logoColor=white">
+  <img alt="End-to-end encrypted sync" src="https://img.shields.io/badge/sync-end--to--end%20encrypted-5fe6cf?style=flat-square">
+  <img alt="Offline first" src="https://img.shields.io/badge/works-offline-informational?style=flat-square">
+</p>
 
-Scratchy is a personal Android notes app, built for speed first and for keeping your notes private second.
+---
 
-<!-- Screenshots go here: the edge bar, the floating card, the notes grid, the vault. -->
+You are watching a video, reading an article, in the middle of a chat, and an idea shows up. A thin bar on the edge of your screen opens a note card **right on top of what you are doing**. You type, close it, and carry on. You never left the app.
 
-## What it feels like
+<br>
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/img/categories.svg" alt="Categories"></td>
+    <td width="50%"><img src="docs/img/vault.svg" alt="Secret vault"></td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="docs/img/sync.svg" alt="Private sync"></td>
+    <td width="50%"><img src="docs/img/colors.svg" alt="Your colors"></td>
+  </tr>
+</table>
+
+<br>
+
+## Everything it does
 
 **Capture without leaving where you are**
 - A slim bar sits on the left or right edge of the screen. Tap or swipe it and the card opens with a small "genie" animation, then shrinks back into the bar when you close it.
