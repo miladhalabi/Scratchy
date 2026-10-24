@@ -156,7 +156,7 @@ class MainActivity : Activity() {
         chips = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
         chipScroll = android.widget.HorizontalScrollView(this).apply {
             isHorizontalScrollBarEnabled = false; visibility = View.GONE
-            setPadding(0, dp(10), 0, 0)
+            setPadding(0, dp(10), 0, dp(10))
             addView(chips)
         }
         if (!secretMode) column.addView(chipScroll, LinearLayout.LayoutParams(-1, -2))
