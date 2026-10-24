@@ -21,34 +21,55 @@
   </tr>
 </table>
 
-## What it does
+## Why it exists
 
-**Capture**
-- A slim bar on the left or right edge. Tap or swipe it and the card opens, with a small genie animation. Close it and it shrinks back.
-- Drag and resize the card, change its opacity and blur, or pin it so it stays while you use the phone.
-- Checklists, images in notes, paste from the clipboard.
-- Take a screenshot and the bar turns green. Open the card and pick where it goes: the current note, a new one, or another note.
+An idea shows up while you are watching a video, reading, or mid-chat. Opening a notes app means leaving everything, and by the time you are back, the thought is gone. Scratchy puts the note **on top of what you are doing**, then gets out of your way.
 
-**Organize**
-- Notes in a two-column grid, pinned first, with search.
-- **Categories.** Pick one by hand, or tap *Sort with AI* and every uncategorized note gets filed. If a note fits none of your categories, it gets a new one.
-- While you write, a small chip can suggest a category. Tap to accept, or ignore it. You can turn it off in Settings.
-- AI titles on request: tap the sparkle by the title for three options. Works in any language.
+## Capture, without leaving where you are
 
-**Keep private**
-- A **vault** for secret notes, behind a password and your fingerprint. Pull the notes list down a long way, and a lock appears; let go to open it. A normal scroll never does.
-- Secret notes are hidden from every list and search, encrypted on the phone, and screenshots are blocked on those screens.
+- **An edge bar that is always there.** A thin line on the left or right edge of the screen, on top of every app, even a fullscreen video. Choose the side and how far from the edge it sits. It tucks away when you are not using it.
+- **Tap or swipe it and the card opens** with a genie animation, as if the note is pulled out of the bar. Close it and it is sucked back in. The speed is yours to set.
+- **The card is a real window.** Drag it anywhere, resize it from the corner, change its opacity and blur, pick a solid or glass look.
+- **Pin it** and the card stays on screen while you carry on using the phone: copy from a page, glance at the card, paste.
+- **It remembers.** The card opens on your last note ready to continue, or on a fresh one. You choose which.
+- **Screenshot? One tap to file it.** The bar turns green the moment you take one. Open the card and choose: add to the current note, start a new note, or pick another note.
+- **Write like it is a real editor.** Checklists that continue on Enter and toggle with a tap, images inside the note, paste from the clipboard (including images from the keyboard), and its own copy, cut and paste bar, because an overlay window cannot show Android's text menu.
 
-**Sync**
-- Optional sync through your own Google Drive. Notes are encrypted on the phone with a key made from your vault password, so Drive only holds scrambled data.
-- Changes reach your other devices in about a second. If two devices edit the same note, different lines are merged, and a clash is kept as a "(conflict)" copy instead of being lost.
+## Organize
 
-**Looks**
-- Colors follow your wallpaper (Material You), light and dark, or use one fixed color from Settings.
+- **A card-style notes grid** with pinned notes first, big image previews cropped from the middle, and instant search across titles, text and categories.
+- **Categories you do not have to think about.** File a note by hand, or tap **Sort with AI** and every uncategorized note is filed in one go. If a note fits none of your categories, it gets a brand new one. Filter the whole list with one tap, hold a chip to rename or remove it.
+- **Suggestions while you write.** A small chip offers a category after you pause typing. Accept with a tap, ignore it and it fades. It never pops up, never steals focus, and can be switched off.
+- **AI titles on demand.** Tap the sparkle for three options, from three words to a full descriptive line. It reads the text, and the first image too (even text inside it), and answers in the language you wrote in.
+- **Hold to delete, with undo.** No "are you sure" for every note, just a bar that lets you take it back.
+
+## Keep it private
+
+- **A vault with no door in sight.** Nothing on screen hints it exists. Pull the notes list down a long way, a lock appears with a haptic click, let go and it opens. Pull back and it disappears. A normal scroll can never open it.
+- **Password and fingerprint.** Secret notes are removed from every list, search, the card and the screenshot picker. They are encrypted on the phone with a key that never leaves Android's hardware-backed Keystore, and screenshots and the recent-apps preview are blocked on those screens.
+- **Your data stays yours.** No account, no ads, no tracking. Nothing leaves the phone unless you turn on sync or ask for an AI feature, and AI only ever sees the note you asked about.
+
+## Sync, the way it should work
+
+- **Instant across devices.** Edit on your phone and the note changes on your tablet in about **a second**, even while its card is open. A small Cloudflare Worker relays the update, and it stores nothing: it only passes sealed messages along.
+- **Encrypted before it leaves.** Every note is sealed on your device with **AES-256-GCM**, with a key derived from your vault password (PBKDF2, 120,000 rounds). Google Drive holds only scrambled files in your private app folder, and the relay only ever sees ciphertext. Secret notes sync too.
+- **No lost edits, ever.** Each note is its own file. Two devices change different lines of the same note? They are merged line by line. Same line changed on both? The newer edit stays and the other is saved as a "(conflict)" note. Nothing is overwritten silently, and a phone with a wrong clock cannot win.
+- **Offline is normal.** Write on a plane, and the devices catch up when you are back. A background sync runs every 15 minutes, there is a status line on the notes screen, and deleted notes stay deleted.
+- **Change your vault password** and everything is re-encrypted for you.
+
+## It looks like your phone
+
+- **Material You.** The whole app takes its colors from your wallpaper, light and dark. Change the wallpaper and the app follows. Prefer one fixed color? Choose it in Settings.
+- **Springs, not stock animations.** Every movement is interruptible and carries your finger's velocity, from the card to the delete bar.
+- **Settings in plain language.** A short menu, small pages, and an Advanced fold for the rest.
+
+## Built to last
+
+Plain Kotlin and Android Views, no Compose and no XML layouts. The merge engine is pure Kotlin with 25 unit tests, and the sync format is versioned. About 6,000 lines.
 
 ## Privacy
 
-- Notes live in the app's private storage. Nothing leaves the phone unless you turn on sync or use an AI feature.
+- Notes live in the app's private storage.
 - AI features send only the note you asked about (or the notes being sorted), only when you tap, to OpenRouter, with a key you paste in yourself.
 - If you forget the vault password, the synced copy cannot be recovered. There is no reset.
 
