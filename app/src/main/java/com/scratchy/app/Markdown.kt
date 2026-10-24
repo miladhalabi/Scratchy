@@ -160,15 +160,16 @@ object Markdown {
             val isTable = !fenced && !isFence && tableRow.matches(line)
             if (isFence) { fenced = !fenced; prevTable = false; continue }
             if (isTable && tableSep.matches(line)) { prevTable = true; continue }
+            val cells = if (isTable) line.trim().trim('|').split("|").map { it.trim() } else emptyList()
+            if (isTable && cells.all { it.isEmpty() }) { prevTable = true; continue }      // empty rows are not worth a preview line
             if (!first) sb.append('\n')
             first = false
             when {
                 fenced -> { val s0 = sb.length; sb.append(line); span(MdMono(), s0, sb.length); span(MdCodeBg(codeBg), s0, sb.length) }
                 isTable -> {
                     val s0 = sb.length
-                    sb.append(line.trim().trim('|').split("|").joinToString("  │  ") { it.trim() })
-                    span(MdMono(), s0, sb.length)
-                    if (!prevTable) span(MdBold(), s0, sb.length)
+                    cells.filter { it.isNotEmpty() }.forEachIndexed { i, cell -> if (i > 0) sb.append("  ·  "); inline(cell) }
+                    if (!prevTable) span(MdBold(), s0, sb.length)                 // the header row
                 }
                 rule.matches(line) -> { val s0 = sb.length; sb.append("────────────"); span(MdDim(dim), s0, sb.length) }
                 else -> {
