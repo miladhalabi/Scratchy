@@ -67,7 +67,7 @@ class Sheet(private val a: Activity, private val pal: Palette = Palette(a)) {
             orientation = LinearLayout.VERTICAL
             background = roundRect(androidx.core.graphics.ColorUtils.blendARGB(pal.surface, pal.text, 0.07f), a.dp(28).toFloat(),
                 (pal.text and 0x00FFFFFF) or 0x24000000, a.dp(1))
-            setPadding(a.dp(22), a.dp(22), a.dp(22), a.dp(10))
+            setPadding(a.dp(22), a.dp(22), a.dp(22), a.dp(8))
             elevation = a.dp(12).toFloat()
         }
         card.addView(TextView(a).apply {
@@ -99,7 +99,7 @@ class Sheet(private val a: Activity, private val pal: Palette = Palette(a)) {
                     }, LinearLayout.LayoutParams(0, -2, 1f))
                     if (it.checked) addView(TextView(a).apply { text = "✓"; textSize = 16f; setTextColor(pal.accent) })
                     pressable(0.98f) { d.dismiss(); it.onTap() }
-                }, LinearLayout.LayoutParams(-1, a.dp(50)))
+                }, LinearLayout.LayoutParams(-1, a.dp(46)))
             }
             val maxH = (a.resources.displayMetrics.heightPixels * 0.5f).toInt()
             card.addView(object : ScrollView(a) {
@@ -116,7 +116,7 @@ class Sheet(private val a: Activity, private val pal: Palette = Palette(a)) {
                 typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
                 setPadding(a.dp(16), 0, a.dp(16), 0)
                 pressable(0.95f) { d.dismiss() }
-            }, LinearLayout.LayoutParams(-2, a.dp(44)))
+            }, LinearLayout.LayoutParams(-2, a.dp(40)))
         }
         confirmLabel?.let { c ->
             buttons.addView(TextView(a).apply {
@@ -126,9 +126,9 @@ class Sheet(private val a: Activity, private val pal: Palette = Palette(a)) {
                 setPadding(a.dp(22), 0, a.dp(22), 0)
                 background = roundRect(if (danger) pal.danger else pal.accent, a.dp(22).toFloat())
                 pressable(0.95f) { d.dismiss(); onConfirm?.invoke(fields.map { it.text.toString() }) }
-            }, LinearLayout.LayoutParams(-2, a.dp(44)).apply { marginStart = a.dp(6) })
+            }, LinearLayout.LayoutParams(-2, a.dp(40)).apply { marginStart = a.dp(6) })
         }
-        if (buttons.childCount > 0) card.addView(buttons, LinearLayout.LayoutParams(-1, -2).apply { topMargin = a.dp(2) })
+        if (buttons.childCount > 0) card.addView(buttons, LinearLayout.LayoutParams(-1, -2).apply { topMargin = a.dp(0) })
         else card.setPadding(a.dp(22), a.dp(22), a.dp(22), a.dp(16))
 
         val width = minOf(a.resources.displayMetrics.widthPixels - a.dp(48), a.dp(400))
