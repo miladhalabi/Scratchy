@@ -576,7 +576,6 @@ class NoteEditor(
 
     /** Asks the AI to add headings, lists, bold, tables... to this note without changing a single word. */
     fun formatWithAi() {
-        android.util.Log.i("ScratchyAI", "format tapped, busy=$aiBusy configured=${Ai.configured(context)} secret=${note.secret}")
         if (aiBusy) return
         if (!Ai.configured(context)) {
             Toast.makeText(context, "Add your OpenRouter key in Settings first", Toast.LENGTH_LONG).show()
@@ -588,10 +587,8 @@ class NoteEditor(
         if (before.isBlank()) { Toast.makeText(context, "Write something first", Toast.LENGTH_SHORT).show(); return }
         if (before.length > 8000) { Toast.makeText(context, "This note is too long to format in one go", Toast.LENGTH_LONG).show(); return }
         aiBusy = true
-        android.util.Log.i("ScratchyAI", "sending ${before.length} chars")
         showAi("✨ Formatting…", palette.accent)
         Ai.formatMarkdown(context, before) { md, err ->
-            android.util.Log.i("ScratchyAI", "result md=${md?.length} err=$err")
             aiBusy = false
             when {
                 md == null -> showAi(err ?: "Couldn't format this note", palette.secondary, { aiChip.visibility = View.GONE }, 60000)   // stays until tapped, so you can read it

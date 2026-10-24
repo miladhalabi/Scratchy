@@ -117,7 +117,6 @@ object Ai {
             val out = reply.trim().removePrefix("```markdown").removePrefix("```md").removePrefix("```").removeSuffix("```").trim('\n')
             diff = Markdown.firstDifference(md, out)
             unchanged = out.trim() == md.trim()
-            android.util.Log.i("ScratchyAI", "attempt $attempt reply=${reply.length} chars, differs=${diff != null}, unchanged=$unchanged")
             if (out.isNotBlank() && diff == null && !unchanged) return out
             extra = if (unchanged) "Your last answer was the same text with no formatting. This time you MUST add Markdown: bullets, a heading and **bold** key terms.\n"
             else "Your last answer changed, added or dropped some words. This time keep every single word exactly as written.\n"
