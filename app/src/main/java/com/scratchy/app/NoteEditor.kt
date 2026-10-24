@@ -130,6 +130,9 @@ class NoteEditor(
     private val offered = HashSet<String>()
     private val askCategory = Runnable { offerCategory() }
     private val hideOffer = Runnable { categoryOffer.visibility = View.GONE }
+    private val aiChip = android.widget.TextView(ctx)
+    private var aiBusy = false
+    private val hideAi = Runnable { aiChip.visibility = View.GONE }
     private val handler = Handler(Looper.getMainLooper())
     private val autosave = Runnable { commit() }
     private var suppress = false
@@ -203,6 +206,13 @@ class NoteEditor(
             background = roundRect((pal.accent and 0x00FFFFFF) or 0x26000000, dp(14).toFloat())
         }
         addView(categoryOffer, LayoutParams(-2, dp(28)).apply { topMargin = dp(6); marginStart = dp(4) })
+        aiChip.apply {
+            visibility = View.GONE
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
+            setTextColor(pal.accent); gravity = Gravity.CENTER
+            maxLines = 2; setPadding(dp(12), 0, dp(12), 0)
+        }
+        addView(aiChip, LayoutParams(-2, dp(32)).apply { topMargin = dp(6); marginStart = dp(4) })
 
         // One scrolling page: images sit in the flow of the note, above the text.
         bodyEdit.minHeight = dp(if (compact) 120 else 240)
@@ -501,6 +511,17 @@ class NoteEditor(
         fun heading(level: Int) { val (a, b) = sel(); RichText.setHeading(t(), a, b, level); afterFormat() }
         fun list(k: Markdown.Kind) { val (a, b) = sel(); RichText.setList(t(), a, b, k, palette, density); afterFormat() }
 
+        root.addView(TextView(context).apply {
+            text = "✨  Format with AI"; setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f); gravity = Gravity.CENTER
+            typeface = android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL)
+            setTextColor(palette.onAccent)
+            background = roundRect(palette.accent, dp(16).toFloat())
+            pressable(0.97f) { panel?.dismiss(); formatWithAi() }
+        }, LayoutParams(-1, dp(46)))
+        root.addView(TextView(context).apply {
+            text = "Adds headings, lists, bold and tables. Your words stay exactly as they are."
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f); setTextColor(palette.secondary); setPadding(dp(4), dp(6), dp(4), 0)
+        })
         section("Text")
         row().apply {
             tile(this, FormatKind.BOLD, "Bold", active = { isIn(Inline.BOLD) }, keepOpen = true) { inline(Inline.BOLD) }
@@ -538,6 +559,54 @@ class NoteEditor(
             setBackgroundDrawable(android.graphics.drawable.ColorDrawable(android.graphics.Color.TRANSPARENT))
             animationStyle = android.R.style.Animation_Dialog
             showAsDropDown(anchor, 0, dp(6), Gravity.END)
+        }
+    }
+
+    // ---- AI formatting: same words, rich format ----
+
+    private fun showAi(text: String, tint: Int, onTap: (() -> Unit)? = null, hideAfterMs: Long = 0) {
+        handler.removeCallbacks(hideAi)
+        aiChip.text = text
+        aiChip.setTextColor(tint)
+        aiChip.background = roundRect((tint and 0xFFFFFF) or 0x26000000, dp(16).toFloat())
+        aiChip.visibility = View.VISIBLE
+        aiChip.setOnClickListener(onTap?.let { t -> View.OnClickListener { t() } })
+        aiChip.isClickable = onTap != null
+        if (hideAfterMs > 0) handler.postDelayed(hideAi, hideAfterMs)
+    }
+
+    private fun applyMarkdown(md: String) {
+        suppress = true
+        bodyEdit.setText(RichText.fromMarkdown(md, palette, resources.displayMetrics.density, ::tableWidth), TextView.BufferType.EDITABLE)
+        suppress = false
+        bodyEdit.setSelection(0)
+        scheduleSave(); refreshFormat()
+    }
+
+    /** Asks the AI to add headings, lists, bold, tables... to this note without changing a single word. */
+    fun formatWithAi() {
+        if (aiBusy) return
+        if (!Ai.configured(context)) {
+            Toast.makeText(context, "Add your OpenRouter key in Settings first", Toast.LENGTH_LONG).show()
+            context.startActivity(android.content.Intent(context, SettingsActivity::class.java).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+            return
+        }
+        if (note.secret) { Toast.makeText(context, "AI is off for secret notes", Toast.LENGTH_SHORT).show(); return }
+        val before = RichText.toMarkdown(bodyEdit.text)
+        if (before.isBlank()) { Toast.makeText(context, "Write something first", Toast.LENGTH_SHORT).show(); return }
+        if (before.length > 8000) { Toast.makeText(context, "This note is too long to format in one go", Toast.LENGTH_LONG).show(); return }
+        aiBusy = true
+        showAi("✨ Formatting…", palette.accent)
+        Ai.formatMarkdown(context, before) { md, err ->
+            aiBusy = false
+            when {
+                md == null -> showAi(err ?: "Couldn't format this note", palette.secondary, null, 7000)
+                RichText.toMarkdown(bodyEdit.text) != before -> showAi("You kept typing, so nothing was changed", palette.secondary, null, 5000)
+                else -> {
+                    applyMarkdown(md)
+                    showAi("✓ Formatted  ·  Undo", palette.accent, { applyMarkdown(before); showAi("Back to how it was", palette.secondary, null, 3000) }, 12000)
+                }
+            }
         }
     }
 

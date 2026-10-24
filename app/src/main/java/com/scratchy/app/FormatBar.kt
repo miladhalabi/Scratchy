@@ -8,7 +8,7 @@ import android.graphics.RectF
 import android.graphics.Typeface
 import android.view.View
 
-enum class FormatKind { BOLD, ITALIC, STRIKE, CODE, HEADING, BULLET, NUMBER, TASK, QUOTE, LINK, OUTDENT, INDENT, TABLE }
+enum class FormatKind { BOLD, ITALIC, STRIKE, CODE, HEADING, BULLET, NUMBER, TASK, QUOTE, LINK, OUTDENT, INDENT, TABLE, AI }
 
 /** One button of the formatting bar. Every icon is drawn here with the same stroke and size, so they all match. */
 class FormatIcon(ctx: Context, val kind: FormatKind, private val pal: Palette) : View(ctx) {
@@ -77,6 +77,18 @@ class FormatIcon(ctx: Context, val kind: FormatKind, private val pal: Palette) :
                 rect.set(cx - 10 * d, cy - 4 * d, cx + 2 * d, cy + 4 * d); c.drawRoundRect(rect, 4 * d, 4 * d, paint)
                 rect.set(cx - 2 * d, cy - 4 * d, cx + 10 * d, cy + 4 * d); c.drawRoundRect(rect, 4 * d, 4 * d, paint)
                 c.restore()
+            }
+            FormatKind.AI -> {
+                paint.style = Paint.Style.FILL
+                path.reset()
+                val r = 9f * d
+                path.moveTo(cx, cy - r); path.quadTo(cx, cy, cx + r, cy); path.quadTo(cx, cy, cx, cy + r)
+                path.quadTo(cx, cy, cx - r, cy); path.quadTo(cx, cy, cx, cy - r)
+                c.drawPath(path, paint)
+                path.reset(); val s = 3.6f * d; val sx = cx + 7.5f * d; val sy = cy - 7.5f * d
+                path.moveTo(sx, sy - s); path.quadTo(sx, sy, sx + s, sy); path.quadTo(sx, sy, sx, sy + s)
+                path.quadTo(sx, sy, sx - s, sy); path.quadTo(sx, sy, sx, sy - s)
+                c.drawPath(path, paint)
             }
             FormatKind.TABLE -> {
                 paint.style = Paint.Style.STROKE

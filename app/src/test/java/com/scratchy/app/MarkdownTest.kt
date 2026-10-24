@@ -74,4 +74,17 @@ class MarkdownTest {
         assertEquals("My big idea", n.heading)
         assertEquals("Titled", Note("1", "Titled", "# other", 1, 1).heading)
     }
+
+    @Test fun words_ignore_markdown_but_not_wording() {
+        val plain = "Shopping list\nmilk, eggs\nCall Sam at 5"
+        val rich = "# Shopping list\n\n- [ ] milk\n- [ ] **eggs**\n1. Call [Sam](https://x.dev) at 5"
+        assertEquals(Markdown.words(plain), Markdown.words(rich))
+        assertNotEquals(Markdown.words(plain), Markdown.words(rich.replace("eggs", "egg")))
+        assertNotEquals(Markdown.words(plain), Markdown.words("$rich\nExtra line"))
+    }
+
+    @Test fun a_table_keeps_the_same_words() {
+        val plain = "Name Age\nBob 4"
+        assertEquals(Markdown.words(plain), Markdown.words("| Name | Age |\n| --- | --- |\n| Bob | 4 |"))
+    }
 }

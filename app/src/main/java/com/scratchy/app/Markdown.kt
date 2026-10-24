@@ -93,6 +93,18 @@ object Markdown {
         }
     }
 
+    // ---- comparing texts ignoring the markdown on them ----
+
+    private val wordRe = Regex("[\\p{L}\\p{N}]+")
+
+    /** Just the words of a text, with all markdown symbols, list markers and link addresses left out. */
+    fun words(md: String): List<String> {
+        var t = md.replace(Regex("]\\([^)\\s]*\\)"), "]")
+        t = t.replace(Regex("(?m)^\\s*[-*+]\\s+\\[[ xX]]\\s"), "")
+        t = t.replace(Regex("(?m)^\\s*\\d{1,3}[.)]\\s"), "")
+        return wordRe.findAll(t).map { it.value }.toList()
+    }
+
     // ---- plain text of one line (note headings, pickers) ----
 
     internal val heading = Regex("^(#{1,6})(\\s+)(.*)$")

@@ -83,6 +83,40 @@ object Ai {
         return out
     }
 
+    /**
+     * Adds markdown structure to [md] without touching its words. [done] runs on the main thread with (markdown, null) or
+     * (null, message). The answer is only accepted when it has exactly the same words in the same order.
+     */
+    fun formatMarkdown(ctx: Context, md: String, done: (String?, String?) -> Unit) {
+        val app = ctx.applicationContext
+        io.execute {
+            val result = runCatching { requestFormat(app, md) }
+            main.post { result.fold({ done(it, null) }, { done(null, it.message ?: "Something went wrong") }) }
+        }
+    }
+
+    private fun requestFormat(ctx: Context, md: String): String {
+        val want = Markdown.words(md)
+        var extra = ""
+        repeat(2) {
+            val prompt = "You are a formatter. Turn the text below into well-structured Markdown WITHOUT changing its words.\n" +
+                "Rules:\n" +
+                "1. Keep every word, number, name and symbol exactly as written, in the same order and the same language. " +
+                "Never add, remove, translate, correct, summarize or reorder anything. Do not fix typos.\n" +
+                "2. Only add Markdown structure: # and ## headings for titles and section names, - bullet lists, 1. numbered lists for steps, " +
+                "- [ ] for to-do items (and - [x] for ones clearly done), **bold** for key labels, `code` for commands and code, > for quotes, " +
+                "and a Markdown table when the text is clearly tabular.\n" +
+                "3. Keep any Markdown that is already there.\n" +
+                "4. Do not add any new text: no title, no intro, no notes.\n" +
+                "5. Reply with only the Markdown, with no code fence around it.\n$extra\nText:\n$md"
+            val reply = chat(ctx, AiSettings.textModel(ctx), JSONArray().put(JSONObject().put("role", "user").put("content", prompt)), 4000, 0.1)
+            val out = reply.trim().removePrefix("```markdown").removePrefix("```md").removePrefix("```").removeSuffix("```").trim('\n')
+            if (out.isNotBlank() && Markdown.words(out) == want) return out
+            extra = "Your last answer changed, added or dropped some words. This time keep every single word exactly as written.\n"
+        }
+        error("The AI changed some of the words, so your note was left as it was. Try again.")
+    }
+
     /** Sends a tiny message to check the key and model. */
     fun ping(ctx: Context, done: (String) -> Unit) {
         val app = ctx.applicationContext
@@ -121,11 +155,11 @@ object Ai {
         return titles.take(3)
     }
 
-    private fun chat(ctx: Context, model: String, messages: JSONArray, maxTokens: Int): String {
+    private fun chat(ctx: Context, model: String, messages: JSONArray, maxTokens: Int, temperature: Double = 0.7): String {
         val key = AiSettings.apiKey(ctx)
         if (key.isEmpty()) error("Add your OpenRouter key in Settings")
         val payload = JSONObject().put("model", model).put("messages", messages)
-            .put("max_tokens", maxTokens).put("temperature", 0.7)
+            .put("max_tokens", maxTokens).put("temperature", temperature)
             // Thinking models (Qwen3, DeepSeek R1...) can spend the whole budget reasoning and return no
             // answer. Titles don't need that, so ask for no reasoning; models without it ignore this.
             .put("reasoning", JSONObject().put("enabled", false))
