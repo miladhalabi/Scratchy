@@ -40,12 +40,12 @@ object TableEditor {
                         inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
                         typeface = if (r == 0) Typeface.create("sans-serif", Typeface.BOLD) else Typeface.DEFAULT
                         setPadding(a.dp(12), a.dp(10), a.dp(12), a.dp(10))
-                        minimumHeight = a.dp(46)
+                        minimumHeight = a.dp(46); gravity = Gravity.CENTER_VERTICAL
                         background = roundRect(if (r == 0) (pal.accent and 0xFFFFFF) or 0x26000000 else pal.track, a.dp(10).toFloat())
                         setOnFocusChangeListener { _, has -> if (has) { fr = r; fc = c } }
                     }
                     list += e
-                    line.addView(e, LinearLayout.LayoutParams(a.dp(140), -2).apply { setMargins(a.dp(2), a.dp(2), a.dp(2), a.dp(2)) })
+                    line.addView(e, LinearLayout.LayoutParams(a.dp(150), -1).apply { setMargins(a.dp(2), a.dp(2), a.dp(2), a.dp(2)) })
                 }
                 cells += list
                 grid.addView(line)
@@ -101,9 +101,15 @@ object TableEditor {
             }, LinearLayout.LayoutParams(-2, a.dp(36)).apply { topMargin = a.dp(10) })
         }
 
-        val dm = a.resources.displayMetrics
-        d.setContentView(card, ViewGroup.LayoutParams(minOf(dm.widthPixels - a.dp(24), a.dp(520)), (dm.heightPixels * 0.78f).toInt()))
+        // The window is the whole screen, so when the keyboard opens it shrinks and the sheet shrinks with it.
+        val frame = android.widget.FrameLayout(a).apply {
+            setPadding(a.dp(12), a.dp(36), a.dp(12), a.dp(12))
+            addView(card, android.widget.FrameLayout.LayoutParams(-1, -1, Gravity.CENTER_HORIZONTAL))
+            setOnClickListener { }
+        }
+        d.setContentView(frame, ViewGroup.LayoutParams(-1, -1))
         d.window?.apply {
+            setLayout(-1, -1)
             setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
             setDimAmount(0.55f)
             setGravity(Gravity.CENTER)
