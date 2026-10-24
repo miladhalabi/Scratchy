@@ -1,159 +1,62 @@
 # Scratchy
 
-A personal Android quick-note app that lives in a thin bar on the edge of the screen. Tap or swipe the bar and a note card opens **over whatever you are doing** (YouTube, a browser, anything) without leaving that app. Write the idea, close the card, carry on.
+**A note card that floats over any app.**
 
-Package `com.scratchy.app` · Kotlin · plain Android Views (no Compose, no XML layouts) · minSdk 26 · targetSdk 34 · compileSdk 35
+You are watching a video, reading an article, in the middle of a chat, and an idea shows up. Tap the thin bar on the edge of your screen, a note card opens right there on top of what you are doing, you type the idea, close it, and carry on. You never left the app.
 
-## Features
+Scratchy is a personal Android notes app, built for speed first and for keeping your notes private second.
 
-**Capture**
-- Edge bar on the left or right side. Tap or swipe to open the card, long-press and drag to move it.
-- Floating note card: draggable, resizable, adjustable opacity and blur, genie open/close animation (speed adjustable).
-- Pin the card to keep it on screen while you use the phone normally.
-- Title and body, checklists, inline images, paste from the clipboard.
-- Screenshot handling: the bar turns green when a screenshot is waiting, and the card asks where it goes (current note, new note, or another note).
-- Optional AI title suggestions through OpenRouter (only the note you ask about, only when you tap).
-- Own copy/cut/paste menu in the card, because an overlay window cannot show Android's text-selection toolbar.
+<!-- Screenshots go here: the edge bar, the floating card, the notes grid, the vault. -->
 
-**Notes app**
-- Two-column notes grid, search, pinned notes first.
-- Hold a note to delete it, with an undo bar.
-- Full-screen editor with autosave.
+## What it feels like
 
-**Secret notes**
-- A vault protected by a password and optional fingerprint.
-- Opened by a long, deliberate **pull-down at the top of the notes list**. A normal pull shows nothing; far enough and a lock appears with a haptic click; release to open.
-- Secret notes are hidden from every list, search, the card and the screenshot picker. Their text is encrypted on disk with an Android Keystore key. Screenshots and the recents preview are blocked on those screens. AI titles are disabled for them.
-- Lock toggle on the card and in the editor.
+**Capture without leaving where you are**
+- A slim bar sits on the left or right edge of the screen. Tap or swipe it and the card opens with a small "genie" animation, then shrinks back into the bar when you close it.
+- Drag the card, resize it, make it see-through or blurry like glass, or pin it so it stays while you keep using the phone.
+- Take a screenshot and the bar changes color. Open the card and Scratchy asks where it goes: the current note, a new one, or another note.
 
-**Sync (optional)**
-- Google Drive hidden app-data folder, one encrypted file per note.
-- End-to-end encrypted with a key derived from your vault password. Drive only stores ciphertext.
-- Three-way line merge. If two devices change the same lines, the newer edit stays and the other is saved as a note ending in "(conflict)". Nothing is silently lost.
-- Near-instant updates (about a second) through a small Cloudflare Worker relay, with Drive as the permanent store and catch-up route.
-- Background sync every ~15 minutes, a sync status line on the notes screen, and a vault password change that re-encrypts everything.
+**Notes that are nice to read and write**
+- A two-column grid of cards, with pinned notes first, search, and big image previews.
+- Checklists, pictures inside the note, paste from the clipboard.
+- Hold a note to delete it, and undo if you were too fast.
+- Everything follows your wallpaper colors (Material You), in light and dark. Prefer one fixed color? Pick it in Settings.
 
-## How sync works
+**Categories that mostly sort themselves**
+- Put a note in a category by hand, or tap **Sort with AI** and every uncategorized note is filed for you. If a note fits nothing you have, it gets a new category of its own.
+- While you write a new note, a small chip quietly suggests a category. Tap it to accept, ignore it and it fades. No popups, and you can switch it off in Settings.
+- Filter the whole list with one tap on a category chip.
 
-```
- device A ──(encrypted note)──► Cloudflare Worker (Durable Object) ──► device B   instant, nothing stored
-    │                                                                    ▲
-    └──(encrypted note file)──► Google Drive appDataFolder ──────────────┘   permanent, also catches up offline devices
-```
+**Titles from AI, only when you ask**
+- Tap the sparkle next to a title and get three options, from short to detailed, based on the text or the first image. Works in any language.
 
-- **Key**: PBKDF2-SHA256 (120k iterations) of the vault password with a random salt kept in Drive (`meta.json`). Notes and images are sealed with AES-256-GCM before upload.
-- **Layout on Drive**: `meta.json`, `n_<id>.enc` (one per note, deletions stored as markers), `img_<name>` (images).
-- **Merge**: each device keeps the last agreed version of every note (`sync_state.json`) as the common ancestor. See `Merge.kt` (pure Kotlin, unit tested). Ordering uses an edit counter (`rev`), not the phone clock.
-- **Relay**: the Worker only forwards opaque encrypted messages to connected devices of the same account. The account "room" is a hash of the sync key. It stores nothing from the relay route.
-- Devices that are offline catch up from Drive when they open the app, reconnect, or on the 15-minute background run.
+**A secret vault, hidden on purpose**
+- Pull the notes list down, slowly and a long way. Nothing shows at first. Keep going and a lock appears with a small buzz. Let go and the vault opens. A normal scroll never triggers it.
+- Protected by a password and your fingerprint. Secret notes are hidden everywhere else: lists, search, the card, the screenshot picker. They are encrypted on the phone, and screenshots are blocked on those screens.
 
-## Build and install
+**Sync across your devices, privately**
+- Connect Google Drive and your notes show up on your other phone or tablet. Everything is encrypted on your device with a key made from your vault password before it leaves, so Drive only ever holds scrambled data.
+- Edits appear on the other device in about a second.
+- Two devices edit the same note at once? Changes to different lines are merged. If the same line changed on both, nothing is lost: one version stays and the other is saved as a "(conflict)" copy.
+- Works offline, and catches up when it can.
 
-Requirements: JDK 17+, Android SDK (platform 35), a device with USB debugging.
+## Privacy, plainly
+
+- Your notes live in the app's private storage on your phone.
+- Nothing is sent anywhere unless you turn on sync or use an AI feature.
+- AI features send only the note you asked about (or the notes being sorted), only when you tap, to OpenRouter with a key you paste in yourself.
+- Synced data is end-to-end encrypted. If you forget the vault password, the synced copy cannot be recovered. There is no reset.
+
+## Try it
+
+Scratchy is not on the Play Store. You build it yourself and install it over USB. See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) for the steps, how sync is set up, how it works inside, and what is still to polish.
 
 ```bash
-./gradlew assembleRelease          # app/build/outputs/apk/release/app-release.apk
-./gradlew testDebugUnitTest        # merge logic tests
+./gradlew assembleRelease
 adb install -r app/build/outputs/apk/release/app-release.apk
 ```
 
-The release build is minified (R8) and signed with the local debug keystore (`~/.config/.android/debug.keystore`), so it upgrades over debug installs and keeps your data. Installing stops the edge bar service; turn it back on from the notes screen.
+On first run, allow "Display over other apps" and photo access, then switch the edge bar on from the notes screen.
 
-First run: allow **Display over other apps** and photo access (for screenshots), then switch the edge bar on.
+## Made with
 
-## Setting up sync
-
-Sync is off until you connect it. You need two things, both free.
-
-### 1. Google Drive access
-
-1. In the [Google Cloud Console](https://console.cloud.google.com), create a project and enable the **Google Drive API**.
-2. Configure the OAuth consent screen (External) and add your Google account as a **test user**.
-3. Create an **OAuth client ID** of type **Android** with package `com.scratchy.app` and the SHA-1 of your signing key:
-   ```bash
-   keytool -list -v -keystore ~/.config/.android/debug.keystore -alias androiddebugkey -storepass android | grep SHA1
-   ```
-4. In the app: **Settings → Sync → Connect Google Drive**, enter your vault password, and approve access.
-5. While the consent screen is in "Testing", Google expires the permission after about 7 days. **Publish the app** from the consent screen to stop that. The only scope used is `drive.appdata`, which is non-sensitive.
-
-Use the **same vault password on every device**.
-
-### 2. Live relay (Cloudflare Worker)
-
-The relay is optional but gives the near-instant updates. It runs on Cloudflare's free plan.
-
-```bash
-cd worker
-npx wrangler login
-npx wrangler deploy
-```
-
-Then set `BASE` in `app/src/main/java/com/scratchy/app/Live.kt` to your Worker URL and rebuild. Without a reachable relay, sync still works through Drive (a few seconds slower).
-
-## Code map
-
-`app/src/main/java/com/scratchy/app/`
-
-| File | Role |
-| --- | --- |
-| `OverlayService.kt` | Foreground service: edge bar window, the floating card, genie animation, screenshot detection |
-| `BarView.kt`, `GenieView.kt` | The bar drawing and the card-into-bar warp animation |
-| `NoteEditor.kt` | Title/body editor with autosave, checklists, images, AI titles, copy menu |
-| `MainActivity.kt` | Notes grid, search, pull-to-open vault gesture, sync status line |
-| `NoteActivity.kt` | Full-screen editor |
-| `SettingsActivity.kt`, `SettingsUi.kt` | Settings screens and components |
-| `Note.kt` | `Note` model and `NoteStore` (local JSON storage, deletion markers) |
-| `Vault.kt`, `VaultGate.kt` | Password hash, fingerprint, Keystore encryption, lock screen |
-| `Sync.kt` | Drive sync engine, key handling, password change, instant receive |
-| `Merge.kt` | Pure merge logic (three-way line merge, conflict copies) |
-| `SyncData.kt` | Note JSON format and per-note sync state |
-| `Live.kt` | WebSocket connection to the relay |
-| `SyncWorker.kt` | 15-minute background sync |
-| `Ai.kt`, `Attachments.kt`, `Screenshots.kt`, `Checklist.kt`, `HoldToDelete.kt`, `Appearance.kt`, `CardNote.kt`, `Ui.kt` | Supporting pieces |
-
-`worker/` holds the Cloudflare Worker and its Durable Object (`src/index.js`).
-
-## Permissions
-
-Display over other apps, foreground service, notifications, photo access (screenshot detection), internet, vibrate, biometrics.
-
-## Privacy and limits
-
-- Notes are stored in the app's private storage. Nothing leaves the phone unless you turn on sync or ask for an AI title.
-- Images attached to secret notes are hidden in the UI but stored as normal private files (not encrypted on disk). They are encrypted in Drive like everything else.
-- If you forget the vault password, the synced copy cannot be recovered. There is no reset.
-- The fingerprint unlocks the app; it is not tied to the encryption key.
-- Large notes (over about 200 KB) skip the instant relay and sync through Drive.
-- Real-time updates need the app open or the edge bar on; otherwise devices catch up on the next open or background run.
-- Phone makers' battery managers (Xiaomi, Honor) can limit the edge bar and the background sync.
-
-## To do: UI polish
-
-The color system (follows the wallpaper, with a fixed-color fallback) and the new Settings menu are done. What is left, roughly in the order I would do it:
-
-**First**
-- [ ] **Screenshot-waiting bar color.** The bar turns green when a screenshot is waiting, but on a teal wallpaper the normal bar is also teal-green. Give the waiting state a clearly different color or cue.
-- [ ] **Dialogs.** Password and connect dialogs use Android's default style. Make them rounded and palette-colored.
-- [ ] **Notes list header.** Three stacked status lines above the search bar (edge bar, "Sync: Synced 16:53", permission prompts). Merge into one quiet line, or show sync state as a small icon next to the gear.
-- [ ] **Edge bar icon** in the Settings menu looks like a slash. Replace it with a proper bar/edge icon.
-- [ ] **Light mode.** Check every screen with the new wallpaper colors.
-- [ ] **Tablet.** The notes grid uses two columns everywhere; use three or four on wide screens, and narrow the Settings pages.
-
-**Then**
-- [ ] **Floating card** with the new colors: header icons, bottom Close strip, continue row, screenshot chooser, AI title chips, glass style on a teal palette.
-- [ ] **Touch targets.** Card header icons are 36dp wide; Android recommends 48dp.
-- [ ] **Note editor.** The top row of six grey icons is crowded.
-- [ ] **Notes grid.** Make the pinned marker easier to see; "No text" shows on notes that only have a title; "(conflict)" notes look like ordinary notes.
-- [ ] **Vault.** Lock screen and the lock that appears on the pull-down.
-- [ ] **Settings pages not reviewed yet:** Edge bar, Card, Screenshots, Sync, Secret notes, AI titles.
-- [ ] **Floating "+" button.** Check contrast on teal.
-- [ ] **Empty states, undo bar and toasts:** wording and spacing.
-
-**Other open items**
-- [ ] Publish the Google OAuth app (Cloud Console, OAuth consent screen, Publish app) so the Drive permission stops expiring every 7 days.
-- [ ] Try the vault password change on two real devices.
-- [ ] Look at the secret-notes images: they are hidden in the app but not encrypted on disk.
-
-## Project notes
-
-`PLAN.md` is the original design plan. The app has since moved from a notification-based idea to the edge bar and card described above.
+Kotlin and plain Android Views (no Compose, no XML layouts). A tiny Cloudflare Worker passes encrypted updates between devices. Android 8.0 and up.
