@@ -8,7 +8,7 @@ import android.graphics.RectF
 import android.graphics.Typeface
 import android.view.View
 
-enum class FormatKind { BOLD, ITALIC, STRIKE, CODE, HEADING, BULLET, NUMBER, TASK, QUOTE, LINK, OUTDENT, INDENT }
+enum class FormatKind { BOLD, ITALIC, STRIKE, CODE, HEADING, BULLET, NUMBER, TASK, QUOTE, LINK, OUTDENT, INDENT, TABLE }
 
 /** One button of the formatting bar. Every icon is drawn here with the same stroke and size, so they all match. */
 class FormatIcon(ctx: Context, val kind: FormatKind, private val pal: Palette) : View(ctx) {
@@ -77,6 +77,12 @@ class FormatIcon(ctx: Context, val kind: FormatKind, private val pal: Palette) :
                 rect.set(cx - 10 * d, cy - 4 * d, cx + 2 * d, cy + 4 * d); c.drawRoundRect(rect, 4 * d, 4 * d, paint)
                 rect.set(cx - 2 * d, cy - 4 * d, cx + 10 * d, cy + 4 * d); c.drawRoundRect(rect, 4 * d, 4 * d, paint)
                 c.restore()
+            }
+            FormatKind.TABLE -> {
+                paint.style = Paint.Style.STROKE
+                rect.set(cx - 9 * d, cy - 8 * d, cx + 9 * d, cy + 8 * d)
+                c.drawRoundRect(rect, 3 * d, 3 * d, paint)
+                line(-9f, -2.5f, 9f, -2.5f); line(-9f, 3f, 9f, 3f); line(-3f, -8f, -3f, 8f); line(3f, -8f, 3f, 8f)
             }
             FormatKind.OUTDENT, FormatKind.INDENT -> {
                 val dir = if (kind == FormatKind.INDENT) 1f else -1f

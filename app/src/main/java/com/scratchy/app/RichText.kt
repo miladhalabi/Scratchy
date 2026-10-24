@@ -10,8 +10,10 @@ import android.text.Layout
 import android.text.Spannable
 import android.text.SpannableStringBuilder
 import android.text.Spanned
+import android.text.StaticLayout
 import android.text.TextPaint
 import android.text.style.CharacterStyle
+import android.text.style.ReplacementSpan
 import android.text.style.LeadingMarginSpan
 import android.text.style.MetricAffectingSpan
 import android.text.style.StrikethroughSpan
@@ -114,18 +116,129 @@ class RLink(val url: String, private val color: Int) : CharacterStyle() {
     override fun updateDrawState(tp: TextPaint) { tp.color = color; tp.isUnderlineText = true }
 }
 
+/** A markdown table: [rows] is every row including the header (row 0), all the same width. Cell text is markdown. */
+class TableData(rows: List<List<String>>) {
+    val cols = (rows.maxOfOrNull { it.size } ?: 1).coerceAtLeast(1)
+    val rows: List<List<String>> = rows.ifEmpty { listOf(listOf("")) }.map { r -> List(cols) { r.getOrElse(it) { "" } } }
+    companion object { fun blank(rows: Int = 3, cols: Int = 3) = TableData(List(rows) { r -> List(cols) { c -> if (r == 0) "Column ${c + 1}" else "" } }) }
+}
+
+/** A table drawn as a real grid in place of one placeholder character (the whole line is that character). */
+class RTable(val data: TableData, private val pal: Palette, private val density: Float, private val avail: () -> Int) : ReplacementSpan(), RPara {
+    private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val cell = TextPaint(Paint.ANTI_ALIAS_FLAG)
+    private val head = TextPaint(Paint.ANTI_ALIAS_FLAG)
+    private var key = -1
+    private var colW = IntArray(0)
+    private var rowH = IntArray(0)
+    private var layouts: List<List<StaticLayout>> = emptyList()
+    private var height = 0
+    private val pad get() = (8 * density).toInt()
+
+    private fun prepare(width: Int, base: Paint) {
+        if (key == width) return
+        key = width
+        val size = base.textSize * 0.9f
+        cell.textSize = size; cell.color = pal.text; cell.typeface = Typeface.DEFAULT
+        head.textSize = size; head.color = pal.text; head.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+        val texts = data.rows.mapIndexed { ri, row -> row.map { Markdown.render(it, pal, density) to (if (ri == 0) head else cell) } }
+        val nat = DoubleArray(data.cols) { c -> texts.maxOf { Layout.getDesiredWidth(it[c].first, it[c].second).toDouble() } + 2 * pad }
+        val minW = 56 * density.toDouble()
+        val w = DoubleArray(data.cols) { nat[it] * width / nat.sum() }
+        val fixed = BooleanArray(data.cols)
+        repeat(2) {
+            for (c in w.indices) if (!fixed[c] && w[c] < minW) { w[c] = minW; fixed[c] = true }
+            val rest = width - w.indices.filter { fixed[it] }.sumOf { w[it] }
+            val flex = w.indices.filter { !fixed[it] }.sumOf { nat[it] }
+            if (flex > 0) for (c in w.indices) if (!fixed[c]) w[c] = nat[c] * rest / flex
+        }
+        colW = IntArray(data.cols) { w[it].toInt().coerceAtLeast(1) }
+        colW[colW.size - 1] += width - colW.sum()
+        layouts = texts.map { row -> row.mapIndexed { c, (t, p) -> StaticLayout.Builder.obtain(t, 0, t.length, p, (colW[c] - 2 * pad).coerceAtLeast(1)).build() } }
+        rowH = IntArray(layouts.size) { r -> layouts[r].maxOf { it.height } + 2 * pad }
+        height = rowH.sum()
+    }
+
+    private fun width() = avail().takeIf { it > 0 } ?: (300 * density).toInt()
+
+    override fun getSize(p: Paint, text: CharSequence?, start: Int, end: Int, fm: Paint.FontMetricsInt?): Int {
+        val w = width()
+        prepare(w, p)
+        fm?.let { it.ascent = -height; it.top = -height; it.descent = 0; it.bottom = 0 }
+        return w
+    }
+
+    override fun draw(c: Canvas, text: CharSequence?, start: Int, end: Int, x: Float, top: Int, y: Int, bottom: Int, p: Paint) {
+        val w = width()
+        prepare(w, p)
+        val line = (pal.secondary and 0xFFFFFF) or 0x66000000
+        val r = 10 * density
+        c.save()
+        c.translate(x, (y - height).toFloat())
+        val box = RectF(0f, 0f, w.toFloat(), height.toFloat())
+        c.save()
+        val clip = Path().apply { addRoundRect(box, r, r, Path.Direction.CW) }
+        c.clipPath(clip)
+        paint.style = Paint.Style.FILL
+        paint.color = (pal.accent and 0xFFFFFF) or 0x26000000
+        c.drawRect(0f, 0f, w.toFloat(), rowH[0].toFloat(), paint)
+        paint.color = line; paint.strokeWidth = density
+        var yy = 0f
+        for (ri in layouts.indices) {
+            var xx = 0f
+            for (ci in layouts[ri].indices) {
+                c.save(); c.translate(xx + pad, yy + pad); layouts[ri][ci].draw(c); c.restore()
+                xx += colW[ci]
+                if (ci < colW.size - 1) c.drawLine(xx, yy, xx, yy + rowH[ri], paint)
+            }
+            yy += rowH[ri]
+            if (ri < layouts.size - 1) c.drawLine(0f, yy, w.toFloat(), yy, paint)
+        }
+        c.restore()
+        paint.style = Paint.Style.STROKE; paint.color = line; paint.strokeWidth = 1.2f * density
+        c.drawRoundRect(box.apply { inset(0.6f * density, 0.6f * density) }, r, r, paint)
+        c.restore()
+    }
+}
+
 enum class Inline { BOLD, ITALIC, STRIKE, CODE }
 
 object RichText {
     private const val FLAGS_TEXT = Spanned.SPAN_EXCLUSIVE_INCLUSIVE      // typing at the end continues the style
     private const val FLAGS_PARA = Spanned.SPAN_INCLUSIVE_INCLUSIVE
-    private val paraClasses = listOf(RCode::class.java, RRaw::class.java, RHeading::class.java, RList::class.java, RQuote::class.java)
+    private const val TABLE_CHAR = '\uFFFC'
+    private val paraClasses = listOf(RTable::class.java, RCode::class.java, RRaw::class.java, RHeading::class.java, RList::class.java, RQuote::class.java)
 
     // ------------------------------------------------------------------ paragraphs
 
     fun paraStart(t: CharSequence, i: Int): Int = if (i <= 0) 0 else t.lastIndexOf('\n', i - 1) + 1
     /** Index just after the paragraph's newline, or the text length for the last paragraph. */
     fun paraEnd(t: CharSequence, i: Int): Int { val n = t.indexOf('\n', i); return if (n < 0) t.length else n + 1 }
+
+    /** The table whose line contains [pos], with the offset of its placeholder character. */
+    fun tableAt(e: Spanned, pos: Int): Pair<RTable, Int>? {
+        val ps = paraStart(e, pos)
+        val t = e.getSpans(ps, minOf(ps + 1, e.length), RTable::class.java).firstOrNull { e.getSpanStart(it) == ps } ?: return null
+        return t to ps
+    }
+
+    fun replaceTable(e: Editable, at: Int, old: RTable, data: TableData, pal: Palette, density: Float, width: () -> Int) {
+        e.removeSpan(old)
+        e.setSpan(RTable(data, pal, density, width), at, at + 1, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+    }
+
+    /** Puts a new table on its own line after the line at [pos]; returns the offset of its placeholder. */
+    fun insertTable(e: Editable, pos: Int, data: TableData, pal: Palette, density: Float, width: () -> Int): Int {
+        val ps = paraStart(e, pos)
+        val end = e.indexOf('\n', ps).let { if (it < 0) e.length else it }
+        val at: Int
+        if (end == ps) { e.replace(ps, ps, TABLE_CHAR.toString()); at = ps }
+        else { e.insert(end, "\n$TABLE_CHAR"); at = end + 1 }
+        if (at + 1 >= e.length || e[at + 1] != '\n') e.insert(at + 1, "\n")
+        for (c in paraClasses) for (s in e.getSpans(at, at + 1, c)) if (s !is RTable) e.removeSpan(s)
+        e.setSpan(RTable(data, pal, density, width), at, at + 1, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+        return at
+    }
 
     /** The paragraph kind (heading, list, quote, ...) of the line at [pos], or null for plain text. */
     fun kindAt(e: Spanned, pos: Int): Any? = kindSpan(e, paraStart(e, pos), paraEnd(e, pos))
@@ -161,7 +274,7 @@ object RichText {
     private const val PUA = 0xE000
     private val escape = Regex("\\\\([\\\\`*_{}\\[\\]()#+\\-.!>~|])")
 
-    fun fromMarkdown(md: String, pal: Palette, density: Float): SpannableStringBuilder {
+    fun fromMarkdown(md: String, pal: Palette, density: Float, tableWidth: () -> Int = { 0 }): SpannableStringBuilder {
         val sb = SpannableStringBuilder()
         val dim = (pal.secondary and 0xFFFFFF) or 0xAA000000.toInt()
         val codeBg = (pal.secondary and 0xFFFFFF) or 0x26000000
@@ -169,11 +282,14 @@ object RichText {
         var fence: String? = null
         var fenceFirst = false
         val queue = ArrayList<Rec>()          // spans are applied at the end, so appending later text can't stretch them
-        for (line in md.replace("\r\n", "\n").replace('\r', '\n').split("\n")) {
+        val lines = md.replace("\r\n", "\n").replace('\r', '\n').split("\n")
+        var i = 0
+        while (i < lines.size) {
+            val line = lines[i]
             val t = line.trimStart()
             if (t.startsWith("```")) {
                 if (fence == null) { fence = t.removePrefix("```").trim(); fenceFirst = true } else fence = null
-                continue
+                i++; continue
             }
             if (n++ > 0) sb.append('\n')
             val ps = sb.length
@@ -181,7 +297,16 @@ object RichText {
             if (fence != null) {
                 sb.append(line)
                 para(RCode(if (fenceFirst) fence else "", codeBg)); fenceFirst = false
-                continue
+                i++; continue
+            }
+            if (Markdown.tableRow.matches(line) && i + 1 < lines.size && Markdown.tableSep.matches(lines[i + 1])) {
+                val rows = ArrayList<List<String>>()
+                rows += splitRow(line)
+                var j = i + 2
+                while (j < lines.size && Markdown.tableRow.matches(lines[j])) { rows += splitRow(lines[j]); j++ }
+                sb.append(TABLE_CHAR)
+                queue += Rec(RTable(TableData(rows), pal, density, tableWidth), ps, ps + 1)
+                i = j; continue
             }
             val h = Markdown.heading.find(line)
             val li = Markdown.listItem(line)
@@ -202,11 +327,23 @@ object RichText {
                 }
                 else -> appendInline(sb, queue, line, pal, allowBold = true)
             }
+            i++
         }
-        for (r in queue) if (r.e > r.s || r.what is RPara) sb.setSpan(r.what, r.s, r.e, if (r.what is RPara) FLAGS_PARA else FLAGS_TEXT)
+        for (r in queue) if (r.e > r.s || r.what is RPara) sb.setSpan(r.what, r.s, r.e,
+            if (r.what is RTable) Spanned.SPAN_EXCLUSIVE_EXCLUSIVE else if (r.what is RPara) FLAGS_PARA else FLAGS_TEXT)
         normalize(sb)
         return sb
     }
+
+    private val cellSplit = Regex("(?<!\\\\)\\|")
+    private fun splitRow(line: String): List<String> {
+        var t = line.trim()
+        if (t.startsWith("|")) t = t.drop(1)
+        if (t.endsWith("|") && !t.endsWith("\\|")) t = t.dropLast(1)
+        return t.split(cellSplit).map { it.replace("\\|", "|").trim() }
+    }
+
+    private fun joinRow(cells: List<String>) = "| " + cells.joinToString(" | ") { it.replace("|", "\\|").replace("\n", " ") } + " |"
 
     private fun appendInline(sb: SpannableStringBuilder, queue: MutableList<Rec>, src: String, pal: Palette, allowBold: Boolean) {
         val text = StringBuilder()
@@ -260,7 +397,12 @@ object RichText {
             val pe = if (nl < 0) e.length else nl + 1
             val kind = kindSpan(e, ps, pe)
             val raw = e.substring(ps, end)
-            if (kind is RCode) {
+            if (kind is RTable && raw.contains(TABLE_CHAR)) {
+                if (inFence) { out += "```"; inFence = false }
+                out += joinRow(kind.data.rows[0])
+                out += "| " + List(kind.data.cols) { "---" }.joinToString(" | ") + " |"
+                for (row in kind.data.rows.drop(1)) out += joinRow(row)
+            } else if (kind is RCode) {
                 if (!inFence) { out += "```" + kind.lang; inFence = true }
                 out += raw
             } else {
@@ -378,15 +520,32 @@ object RichText {
         val cands = e.getSpans(ps, pe, cls).filter { s ->
             val st = e.getSpanStart(s); val en = e.getSpanEnd(s)
             if (ps == pe) st == ps && en == ps else st < pe && en > ps
-        }.sortedBy { e.getSpanStart(it) }
+        }.filter { cls != RTable::class.java || e.getSpanStart(it) >= ps }.sortedBy { e.getSpanStart(it) }
         if (cands.isEmpty()) return
         val keep = cands.firstOrNull { e.getSpanStart(it) <= ps }
         for (s in cands) if (s !== keep) e.removeSpan(s)
+        if (keep is RTable) {                                   // exactly the one placeholder character, never the newline
+            if (ps >= e.length || e[ps] != TABLE_CHAR) e.removeSpan(keep)
+            else if (e.getSpanStart(keep) != ps || e.getSpanEnd(keep) != ps + 1) e.setSpan(keep, ps, ps + 1, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+            return
+        }
         if (keep != null && (e.getSpanStart(keep) != ps || e.getSpanEnd(keep) != pe)) e.setSpan(keep, ps, pe, FLAGS_PARA)
+    }
+
+    /** A table owns its whole line: any text typed next to the placeholder is moved onto its own line. */
+    private fun isolateTables(e: Editable) {
+        for (t in e.getSpans(0, e.length, RTable::class.java)) {
+            val st = e.getSpanStart(t)
+            if (st < 0 || st >= e.length || e[st] != TABLE_CHAR) { e.removeSpan(t); continue }
+            if (st > 0 && e[st - 1] != '\n') { e.insert(st, "\n"); continue }
+            val en = st + 1
+            if (en < e.length && e[en] != '\n') e.insert(en, "\n")
+        }
     }
 
     /** Snaps every paragraph span in [from, to] to exactly one paragraph, and allows only one kind per paragraph. */
     fun normalize(e: Editable, from: Int = 0, to: Int = e.length) {
+        isolateTables(e)
         var ps = paraStart(e, from.coerceIn(0, e.length))
         val last = paraEnd(e, to.coerceIn(0, e.length))
         while (true) {
@@ -525,8 +684,8 @@ object RichText {
 
     /** Applies [make] to each selected paragraph, or removes that format when all of them already have it. */
     fun setParagraph(e: Editable, a: Int, b: Int, same: (Any?) -> Boolean, make: (Any?) -> Any) {
-        val ps = paragraphs(e, a, b)
-        val all = ps.all { (s, en) -> same(kindSpan(e, s, en)) }
+        val ps = paragraphs(e, a, b).filter { (s, en) -> kindSpan(e, s, en) !is RTable }
+        val all = ps.isNotEmpty() && ps.all { (s, en) -> same(kindSpan(e, s, en)) }
         for ((s, en) in ps) {
             val old = kindSpan(e, s, en)
             clearKind(e, s, en)
@@ -590,8 +749,8 @@ object RichText {
     }
 
     /** Parses markdown and inserts it at the selection. The first line joins the current line as plain inline text. */
-    fun insertMarkdown(e: Editable, a: Int, b: Int, md: String, pal: Palette, density: Float) {
-        val parsed = fromMarkdown(md, pal, density)
+    fun insertMarkdown(e: Editable, a: Int, b: Int, md: String, pal: Palette, density: Float, tableWidth: () -> Int = { 0 }) {
+        val parsed = fromMarkdown(md, pal, density, tableWidth)
         val joinFirst = a > paraStart(e, a)                                 // pasting mid-line: the first line keeps the line's own format
         if (joinFirst) {
             val firstEnd = paraEnd(parsed, 0)

@@ -84,8 +84,9 @@ class NoteActivity : Activity() {
             addView(iconButton(R.drawable.ic_back, pal.text, "Back") { finish() },
                 LinearLayout.LayoutParams(dp(44), dp(44)))
             addView(View(this@NoteActivity), LinearLayout.LayoutParams(0, 1, 1f))
-            addView(iconButton(R.drawable.ic_checklist, pal.secondary, "Checklist") { editor.toggleChecklist() },
-                LinearLayout.LayoutParams(dp(44), dp(44)))
+            val formatButton = iconButton(R.drawable.ic_format, pal.accent, "Format") { formatAnchor?.let { editor.showFormatPanel(it) } }
+            formatAnchor = formatButton
+            addView(formatButton, LinearLayout.LayoutParams(dp(44), dp(44)))
             addView(iconButton(R.drawable.ic_paste, pal.secondary, "Paste") { editor.pasteFromClipboard() },
                 LinearLayout.LayoutParams(dp(44), dp(44)))
             addView(iconButton(R.drawable.ic_screenshot, pal.secondary, "Attach latest screenshot") {
@@ -123,6 +124,7 @@ class NoteActivity : Activity() {
     }
 
     private lateinit var categoryPill: TextView
+    private var formatAnchor: View? = null
 
     private fun showCategory() {
         val c = editor.note.category

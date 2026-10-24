@@ -94,7 +94,7 @@ class NoteEditor(
     private fun pasteMarkdown(text: String) {
         val a = bodyEdit.selectionStart.coerceAtLeast(0)
         val b = bodyEdit.selectionEnd.coerceAtLeast(0)
-        RichText.insertMarkdown(bodyEdit.text, minOf(a, b), maxOf(a, b), text, palette, resources.displayMetrics.density)
+        RichText.insertMarkdown(bodyEdit.text, minOf(a, b), maxOf(a, b), text, palette, resources.displayMetrics.density, ::tableWidth)
     }
 
     private fun insertAtSelection(target: EditText, text: CharSequence) {
@@ -140,9 +140,8 @@ class NoteEditor(
     private var chCount = 0
     /** The markdown the body had when it was last loaded or saved. Lets an untouched note keep its exact original text. */
     private var canon = ""
-    private val formatScroll = HorizontalScrollView(ctx)
-    private val formatRow = LinearLayout(ctx)
-    private val formatButtons = LinkedHashMap<String, FormatIcon>()
+    private var panel: android.widget.PopupWindow? = null
+    private val panelRefresh = ArrayList<() -> Unit>()
     private val linkRow = LinearLayout(ctx)
     private val linkField = EditText(ctx)
 
@@ -218,15 +217,8 @@ class NoteEditor(
             addView(page)
         }, LayoutParams(-1, 0, 1f))
 
-        // The formatting bar sits at the bottom, so it rides on top of the keyboard. It is only for the full note screen.
-        if (!compact) {
-            buildFormatBar(ctx, pal)
-            addView(linkRow, LayoutParams(-1, -2))
-            addView(formatScroll, LayoutParams(-1, -2))
-            bodyEdit.setOnFocusChangeListener { _, _ -> updateBarVisible() }
-            linkField.setOnFocusChangeListener { _, _ -> updateBarVisible() }
-            updateBarVisible()
-        }
+        // The link field appears above the keyboard only while a link is being added (full note screen only).
+        if (!compact) { buildLinkRow(ctx, pal); addView(linkRow, LayoutParams(-1, -2)) }
 
         load(note)
 
@@ -281,6 +273,7 @@ class NoteEditor(
                 val text = bodyEdit.text
                 val line = layout.getLineForVertical((ev.y + bodyEdit.scrollY - bodyEdit.totalPaddingTop).toInt())
                 val off = layout.getLineStart(line)
+                RichText.tableAt(text, off)?.let { (_, at) -> editTableAt(at); return true }
                 val margin = RichText.taskMarginAt(text, off) ?: return false
                 if (RichText.paraStart(text, off) == off && ev.x < bodyEdit.totalPaddingLeft + margin) {
                     if (RichText.toggleTaskAt(text, off)) { scheduleSave(); bodyEdit.invalidate() }
@@ -386,7 +379,7 @@ class NoteEditor(
         note = n
         images.clear(); images.addAll(n.images)
         titleEdit.setText(n.title)
-        bodyEdit.setText(RichText.fromMarkdown(n.body, palette, resources.displayMetrics.density), TextView.BufferType.EDITABLE)
+        bodyEdit.setText(RichText.fromMarkdown(n.body, palette, resources.displayMetrics.density, ::tableWidth), TextView.BufferType.EDITABLE)
         canon = RichText.toMarkdown(bodyEdit.text)
         bodyEdit.setSelection(bodyEdit.text.length)
         suppress = false
@@ -439,55 +432,7 @@ class NoteEditor(
 
     private fun afterFormat() { scheduleSave(); refreshFormat(); bodyEdit.invalidate() }
 
-    private fun button(kind: FormatKind, key: String = kind.name, onTap: () -> Unit) {
-        val v = FormatIcon(context, kind, palette)
-        v.pressable(0.9f) { bodyEdit.requestFocus(); onTap() }
-        formatButtons[key] = v
-        formatRow.addView(v, LayoutParams(dp(42), dp(46)))
-    }
-
-    private fun divider() {
-        formatRow.addView(View(context).apply { setBackgroundColor(palette.hairline) },
-            LayoutParams(1, dp(22)).apply { gravity = Gravity.CENTER_VERTICAL; marginStart = dp(3); marginEnd = dp(3) })
-    }
-
-    private fun updateBarVisible() {
-        formatScroll.visibility = if (bodyEdit.hasFocus() || linkField.hasFocus()) View.VISIBLE else View.GONE
-    }
-
-    private fun buildFormatBar(ctx: Context, pal: Palette) {
-        val density = resources.displayMetrics.density
-        fun text(kind: Inline) { val (a, b) = selection(); RichText.toggleInline(bodyEdit.text, kind, a, b, palette); afterFormat() }
-        fun list(kind: Markdown.Kind) { val (a, b) = selection(); RichText.setList(bodyEdit.text, a, b, kind, palette, density); afterFormat() }
-        formatRow.gravity = Gravity.CENTER_VERTICAL
-        button(FormatKind.BOLD) { text(Inline.BOLD) }
-        button(FormatKind.ITALIC) { text(Inline.ITALIC) }
-        button(FormatKind.STRIKE) { text(Inline.STRIKE) }
-        button(FormatKind.HEADING) {
-            val (a, b) = selection()
-            val cur = (RichText.kindAt(bodyEdit.text, a) as? RHeading)?.level ?: 0
-            // H -> H1 -> H2 -> H3 -> plain again (setHeading with the level it already has clears it)
-            RichText.setHeading(bodyEdit.text, a, b, if (cur == 0) 1 else if (cur < 3) cur + 1 else cur)
-            afterFormat()
-        }
-        divider()
-        button(FormatKind.BULLET) { list(Markdown.Kind.BULLET) }
-        button(FormatKind.NUMBER) { list(Markdown.Kind.NUMBER) }
-        button(FormatKind.TASK) { list(Markdown.Kind.TASK) }
-        button(FormatKind.QUOTE) { val (a, b) = selection(); RichText.setQuote(bodyEdit.text, a, b, palette, density); afterFormat() }
-        divider()
-        button(FormatKind.LINK) { showLinkRow() }
-        button(FormatKind.CODE) { text(Inline.CODE) }
-        button(FormatKind.OUTDENT) { val (a, b) = selection(); RichText.shift(bodyEdit.text, a, b, -1); afterFormat() }
-        button(FormatKind.INDENT) { val (a, b) = selection(); RichText.shift(bodyEdit.text, a, b, 1); afterFormat() }
-        formatScroll.apply {
-            isHorizontalScrollBarEnabled = false
-            overScrollMode = View.OVER_SCROLL_NEVER
-            setPadding(dp(6), dp(2), dp(6), dp(2))
-            clipToPadding = false
-            background = roundRect(pal.surface, 0f)
-            addView(formatRow)
-        }
+    private fun buildLinkRow(ctx: Context, pal: Palette) {
         linkRow.apply {
             visibility = View.GONE; gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(8), dp(8), dp(8), dp(8))
@@ -510,6 +455,116 @@ class NoteEditor(
         }
     }
 
+    // ---- the Format panel (opened from the note screen's top bar) ----
+
+    private fun tableWidth() = (bodyEdit.measuredWidth - bodyEdit.paddingLeft - bodyEdit.paddingRight).takeIf { it > 0 }
+        ?: (resources.displayMetrics.widthPixels - dp(40))
+
+    /** A panel with large, labelled tiles. It does not take focus, so the keyboard and your selection stay as they are. */
+    fun showFormatPanel(anchor: View) {
+        panel?.dismiss()
+        val density = resources.displayMetrics.density
+        panelRefresh.clear()
+        val root = LinearLayout(context).apply {
+            orientation = VERTICAL
+            setPadding(dp(14), dp(12), dp(14), dp(14))
+            background = roundRect(palette.surface, dp(22).toFloat(), (palette.text and 0xFFFFFF) or 0x24000000, dp(1))
+            elevation = dp(10).toFloat()
+        }
+        fun section(name: String) = root.addView(TextView(context).apply {
+            text = name.uppercase(); setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f); letterSpacing = 0.1f
+            setTextColor(palette.secondary); setPadding(dp(4), dp(10), 0, dp(4))
+        })
+        fun row() = LinearLayout(context).also { root.addView(it, LayoutParams(-1, -2)) }
+        fun tile(into: LinearLayout, kind: FormatKind, label: String, iconLabel: String = "", active: () -> Boolean, keepOpen: Boolean = false, tap: () -> Unit) {
+            val icon = FormatIcon(context, kind, palette).also { it.label = iconLabel }
+            val name = TextView(context).apply { text = label; setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f); gravity = Gravity.CENTER; maxLines = 1 }
+            val cell = LinearLayout(context).apply {
+                orientation = VERTICAL; gravity = Gravity.CENTER_HORIZONTAL
+                addView(icon, LayoutParams(dp(52), dp(40)))
+                addView(name, LayoutParams(-2, -2))
+                setPadding(0, dp(2), 0, dp(4))
+                pressable(0.94f) {
+                    bodyEdit.requestFocus(); tap()
+                    if (keepOpen) panelRefresh.forEach { it() } else panel?.dismiss()
+                }
+            }
+            val refresh = { val on = active(); icon.active = on; name.setTextColor(if (on) palette.accent else palette.secondary) }
+            panelRefresh += refresh; refresh()
+            into.addView(cell, LayoutParams(0, -2, 1f))
+        }
+        val t = { bodyEdit.text }
+        fun sel() = selection()
+        fun inline(k: Inline) { val (a, b) = sel(); RichText.toggleInline(t(), k, a, b, palette); afterFormat() }
+        fun isIn(k: Inline) = sel().let { (a, b) -> RichText.isActive(t(), k, a, b) }
+        fun kind() = RichText.kindAt(t(), sel().first)
+        fun heading(level: Int) { val (a, b) = sel(); RichText.setHeading(t(), a, b, level); afterFormat() }
+        fun list(k: Markdown.Kind) { val (a, b) = sel(); RichText.setList(t(), a, b, k, palette, density); afterFormat() }
+
+        section("Text")
+        row().apply {
+            tile(this, FormatKind.BOLD, "Bold", active = { isIn(Inline.BOLD) }, keepOpen = true) { inline(Inline.BOLD) }
+            tile(this, FormatKind.ITALIC, "Italic", active = { isIn(Inline.ITALIC) }, keepOpen = true) { inline(Inline.ITALIC) }
+            tile(this, FormatKind.STRIKE, "Strike", active = { isIn(Inline.STRIKE) }, keepOpen = true) { inline(Inline.STRIKE) }
+            tile(this, FormatKind.CODE, "Code", active = { isIn(Inline.CODE) }, keepOpen = true) { inline(Inline.CODE) }
+            tile(this, FormatKind.LINK, "Link", active = { sel().let { (a, b) -> RichText.linkAt(t(), a, b) != null } }) { showLinkRow() }
+        }
+        section("Heading")
+        row().apply {
+            for (l in 1..3) tile(this, FormatKind.HEADING, listOf("Large", "Medium", "Small")[l - 1], "H$l",
+                active = { (kind() as? RHeading)?.level == l }) { heading(l) }
+            tile(this, FormatKind.HEADING, "Normal", "Aa", active = { false }) {
+                val (a, b) = sel(); (kind() as? RHeading)?.let { RichText.setHeading(t(), a, b, it.level) }; afterFormat()
+            }
+        }
+        section("Lists")
+        row().apply {
+            tile(this, FormatKind.BULLET, "Bullets", active = { (kind() as? RList)?.kind == Markdown.Kind.BULLET }) { list(Markdown.Kind.BULLET) }
+            tile(this, FormatKind.NUMBER, "Numbers", active = { (kind() as? RList)?.kind == Markdown.Kind.NUMBER }) { list(Markdown.Kind.NUMBER) }
+            tile(this, FormatKind.TASK, "Checklist", active = { (kind() as? RList)?.kind == Markdown.Kind.TASK }) { list(Markdown.Kind.TASK) }
+            tile(this, FormatKind.QUOTE, "Quote", active = { kind() is RQuote }) { val (a, b) = sel(); RichText.setQuote(t(), a, b, palette, density); afterFormat() }
+        }
+        section("Insert")
+        row().apply {
+            tile(this, FormatKind.TABLE, "Table", active = { false }) { insertTable() }
+            tile(this, FormatKind.OUTDENT, "Outdent", active = { false }, keepOpen = true) { val (a, b) = sel(); RichText.shift(t(), a, b, -1); afterFormat() }
+            tile(this, FormatKind.INDENT, "Indent", active = { false }, keepOpen = true) { val (a, b) = sel(); RichText.shift(t(), a, b, 1); afterFormat() }
+            addView(View(context), LayoutParams(0, 1, 2f))
+        }
+
+        val w = minOf(resources.displayMetrics.widthPixels - dp(24), dp(400))
+        panel = android.widget.PopupWindow(root, w, android.view.ViewGroup.LayoutParams.WRAP_CONTENT, false).apply {
+            isOutsideTouchable = true
+            setBackgroundDrawable(android.graphics.drawable.ColorDrawable(android.graphics.Color.TRANSPARENT))
+            animationStyle = android.R.style.Animation_Dialog
+            showAsDropDown(anchor, 0, dp(6), Gravity.END)
+        }
+    }
+
+    private fun insertTable() {
+        val (a, _) = selection()
+        val at = RichText.insertTable(bodyEdit.text, a, TableData.blank(), palette, resources.displayMetrics.density, ::tableWidth)
+        afterFormat()
+        editTableAt(at)
+    }
+
+    /** Opens the table editor for the table at [pos] (the card has no activity to show it in). */
+    private fun editTableAt(pos: Int) {
+        val (span, at) = RichText.tableAt(bodyEdit.text, pos) ?: return
+        val act = context as? android.app.Activity
+        if (act == null) { Toast.makeText(context, "Open the note in the app to edit its table", Toast.LENGTH_SHORT).show(); return }
+        TableEditor.show(act, palette, span.data) { result ->
+            val t = bodyEdit.text
+            val cur = RichText.tableAt(t, at)?.first ?: return@show
+            if (result == null) {
+                var end = at + 1
+                if (end < t.length && t[end] == '\n') end++
+                t.delete(at, end)
+            } else RichText.replaceTable(t, at, cur, result, palette, resources.displayMetrics.density, ::tableWidth)
+            afterFormat()
+        }
+    }
+
     private var linkRange = 0 to 0
 
     private fun showLinkRow() {
@@ -529,24 +584,8 @@ class NoteEditor(
         afterFormat()
     }
 
-    /** Lights up the buttons for whatever the cursor or selection is in. */
-    private fun refreshFormat() {
-        if (formatButtons.isEmpty()) return
-        val (a, b) = selection()
-        val t = bodyEdit.text
-        val kind = RichText.kindAt(t, a)
-        fun on(key: FormatKind, active: Boolean) { formatButtons[key.name]?.active = active }
-        on(FormatKind.BOLD, RichText.isActive(t, Inline.BOLD, a, b)); on(FormatKind.ITALIC, RichText.isActive(t, Inline.ITALIC, a, b))
-        on(FormatKind.STRIKE, RichText.isActive(t, Inline.STRIKE, a, b)); on(FormatKind.CODE, RichText.isActive(t, Inline.CODE, a, b))
-        on(FormatKind.HEADING, kind is RHeading); formatButtons[FormatKind.HEADING.name]?.label = if (kind is RHeading) "H${kind.level}" else "H"
-        on(FormatKind.BULLET, kind is RList && kind.kind == Markdown.Kind.BULLET)
-        on(FormatKind.NUMBER, kind is RList && kind.kind == Markdown.Kind.NUMBER)
-        on(FormatKind.TASK, kind is RList && kind.kind == Markdown.Kind.TASK)
-        on(FormatKind.QUOTE, kind is RQuote)
-        on(FormatKind.LINK, RichText.linkAt(t, a, b) != null)
-        val inList = kind is RList
-        listOf(FormatKind.OUTDENT, FormatKind.INDENT).forEach { formatButtons[it.name]?.visibility = if (inList) View.VISIBLE else View.GONE }
-    }
+    /** The open Format panel lights up for whatever the cursor or selection is in. */
+    private fun refreshFormat() { if (panel?.isShowing == true) panelRefresh.forEach { it() } }
 
     /** Asks the AI for three titles from the text and/or first image, shown as tappable chips. */
     fun suggestTitle() {
