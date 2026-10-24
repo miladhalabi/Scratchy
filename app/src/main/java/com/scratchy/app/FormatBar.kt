@@ -14,6 +14,8 @@ enum class FormatKind { BOLD, ITALIC, STRIKE, CODE, HEADING, BULLET, NUMBER, TAS
 class FormatIcon(ctx: Context, val kind: FormatKind, private val pal: Palette) : View(ctx) {
     var active = false
         set(v) { if (field != v) { field = v; invalidate() } }
+    /** Overrides the icon colour (used for the AI button in the note's top bar). */
+    var tint: Int? = null
     var label = ""
         set(v) { if (field != v) { field = v; invalidate() } }
 
@@ -41,7 +43,7 @@ class FormatIcon(ctx: Context, val kind: FormatKind, private val pal: Palette) :
             rect.set(3 * d, 5 * d, width - 3 * d, height - 5 * d)
             c.drawRoundRect(rect, 10 * d, 10 * d, paint)
         }
-        val fg = if (active) pal.onAccent else pal.text
+        val fg = if (active) pal.onAccent else (tint ?: pal.text)
         paint.color = fg
         paint.strokeWidth = 1.9f * d
         val cx = width / 2f

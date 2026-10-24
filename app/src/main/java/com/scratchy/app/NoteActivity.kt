@@ -84,6 +84,11 @@ class NoteActivity : Activity() {
             addView(iconButton(R.drawable.ic_back, pal.text, "Back") { finish() },
                 LinearLayout.LayoutParams(dp(44), dp(44)))
             addView(View(this@NoteActivity), LinearLayout.LayoutParams(0, 1, 1f))
+            val aiButton = FormatIcon(this@NoteActivity, FormatKind.AI, pal).apply {
+                tint = pal.accent; contentDescription = "Format with AI"
+                pressable(0.9f) { editor.formatWithAi() }
+            }
+            addView(aiButton, LinearLayout.LayoutParams(dp(44), dp(44)))
             val formatButton = iconButton(R.drawable.ic_format, pal.accent, "Format") { formatAnchor?.let { editor.showFormatPanel(it) } }
             formatAnchor = formatButton
             addView(formatButton, LinearLayout.LayoutParams(dp(44), dp(44)))

@@ -511,17 +511,6 @@ class NoteEditor(
         fun heading(level: Int) { val (a, b) = sel(); RichText.setHeading(t(), a, b, level); afterFormat() }
         fun list(k: Markdown.Kind) { val (a, b) = sel(); RichText.setList(t(), a, b, k, palette, density); afterFormat() }
 
-        root.addView(TextView(context).apply {
-            text = "✨  Format with AI"; setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f); gravity = Gravity.CENTER
-            typeface = android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL)
-            setTextColor(palette.onAccent)
-            background = roundRect(palette.accent, dp(16).toFloat())
-            pressable(0.97f) { panel?.dismiss(); formatWithAi() }
-        }, LayoutParams(-1, dp(46)))
-        root.addView(TextView(context).apply {
-            text = "Adds headings, lists, bold and tables. Your words stay exactly as they are."
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f); setTextColor(palette.secondary); setPadding(dp(4), dp(6), dp(4), 0)
-        })
         section("Text")
         row().apply {
             tile(this, FormatKind.BOLD, "Bold", active = { isIn(Inline.BOLD) }, keepOpen = true) { inline(Inline.BOLD) }
