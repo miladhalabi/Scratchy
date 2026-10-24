@@ -210,9 +210,9 @@ class NoteEditor(
             visibility = View.GONE
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
             setTextColor(pal.accent); gravity = Gravity.CENTER
-            maxLines = 2; setPadding(dp(12), 0, dp(12), 0)
+            maxLines = 4; setPadding(dp(12), dp(6), dp(12), dp(6))
         }
-        addView(aiChip, LayoutParams(-2, dp(32)).apply { topMargin = dp(6); marginStart = dp(4) })
+        addView(aiChip, LayoutParams(-2, -2).apply { topMargin = dp(6); marginStart = dp(4) })
 
         // One scrolling page: images sit in the flow of the note, above the text.
         bodyEdit.minHeight = dp(if (compact) 120 else 240)
@@ -591,7 +591,7 @@ class NoteEditor(
         Ai.formatMarkdown(context, before) { md, err ->
             aiBusy = false
             when {
-                md == null -> showAi(err ?: "Couldn't format this note", palette.secondary, null, 7000)
+                md == null -> showAi(err ?: "Couldn't format this note", palette.secondary, { aiChip.visibility = View.GONE }, 60000)   // stays until tapped, so you can read it
                 RichText.toMarkdown(bodyEdit.text) != before -> showAi("You kept typing, so nothing was changed", palette.secondary, null, 5000)
                 else -> {
                     applyMarkdown(md)
