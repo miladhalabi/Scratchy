@@ -1,1 +1,0 @@
-{"default":{"identifier":"default","description":"","local":true,"windows":["main","bar","card","catcher"],"permissions":["core:default","core:event:default",{"identifier":"http:default","allow":[{"url":"https://www.googleapis.com/*"},{"url":"https://oauth2.googleapis.com/*"},{"url":"https://scratchy-sync.halabimilad.workers.dev/*"}]}]}}
