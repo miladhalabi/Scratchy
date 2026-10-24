@@ -1,7 +1,6 @@
 package com.scratchy.app
 
 import android.app.Activity
-import android.app.AlertDialog
 import android.app.Dialog
 import android.graphics.BitmapFactory
 import android.content.Intent
@@ -151,14 +150,11 @@ class NoteActivity : Activity() {
     }
 
     private fun confirmDelete() {
-        AlertDialog.Builder(this)
-            .setTitle("Delete this note?")
-            .setPositiveButton("Delete") { _, _ ->
+        Sheet(this, pal).title("Delete this note?").message("This can't be undone.")
+            .confirm("Delete", danger = true) {
                 NoteStore.delete(this, editor.note.id)
                 finish()
-            }
-            .setNegativeButton("Cancel", null)
-            .show()
+            }.show()
     }
 
     override fun onPause() {

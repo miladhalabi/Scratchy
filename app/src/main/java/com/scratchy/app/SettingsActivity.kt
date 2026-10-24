@@ -1,7 +1,6 @@
 package com.scratchy.app
 
 import android.app.Activity
-import android.app.AlertDialog
 import android.content.ClipboardManager
 import android.graphics.Color
 import android.graphics.Typeface
@@ -30,21 +29,9 @@ class SettingsActivity : Activity() {
     private var syncPassword: String? = null
     private lateinit var syncNewPw: TextView
 
-    private fun passwordField(hint: String) = EditText(this).apply {
-        this.hint = hint
-        inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
-        setSingleLine(true)
-    }
-
-    private fun passwordDialog(title: String, message: String, fields: List<EditText>, onOk: (List<String>) -> Unit) {
-        val box = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(24), dp(8), dp(24), dp(0))
-            fields.forEach { addView(it) }
-        }
-        AlertDialog.Builder(this).setTitle(title).setMessage(message).setView(box)
-            .setPositiveButton("OK") { _, _ -> onOk(fields.map { it.text.toString() }) }
-            .setNegativeButton("Cancel", null).show()
+    private fun passwordDialog(title: String, message: String, hints: List<String>, onOk: (List<String>) -> Unit) {
+        Sheet(this, pal).title(title).message(message).apply { hints.forEach { field(it, password = true) } }
+            .confirm("OK", onOk = onOk).show()
     }
 
     private fun changePassword() {
@@ -52,7 +39,7 @@ class SettingsActivity : Activity() {
             Toast.makeText(this, "No vault password yet. Pull down the notes list to set one.", Toast.LENGTH_LONG).show(); return
         }
         passwordDialog("Change vault password", "Enter your current password, then the new one.",
-            listOf(passwordField("Current password"), passwordField("New password"), passwordField("Repeat new password"))) { (old, new, again) ->
+            listOf("Current password", "New password", "Repeat new password")) { (old, new, again) ->
             when {
                 !Vault.checkPassword(this, old) -> Toast.makeText(this, "Current password is wrong", Toast.LENGTH_SHORT).show()
                 new.length < 4 -> Toast.makeText(this, "Use at least 4 characters", Toast.LENGTH_SHORT).show()
@@ -74,7 +61,7 @@ class SettingsActivity : Activity() {
     /** This device missed a password change made elsewhere: take the new password and rejoin. */
     private fun enterNewPassword() {
         passwordDialog("New vault password", "Enter the vault password you set on your other device.",
-            listOf(passwordField("New password"))) { (pw) ->
+            listOf("New password")) { (pw) ->
             syncBusy = true; syncUi()
             Sync.run(this, pw) { out ->
                 syncBusy = false
@@ -93,22 +80,13 @@ class SettingsActivity : Activity() {
             Toast.makeText(this, "Set a vault password first: pull down the notes list", Toast.LENGTH_LONG).show()
             return
         }
-        val input = EditText(this).apply {
-            hint = "Vault password"
-            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
-            setPadding(dp(24), dp(16), dp(24), dp(16))
-        }
-        AlertDialog.Builder(this)
-            .setTitle("Connect Google Drive")
-            .setMessage("Enter your vault password. It encrypts your notes before they leave this phone.")
-            .setView(input)
-            .setPositiveButton("Connect") { _, _ ->
-                val pw = input.text.toString()
+        Sheet(this, pal).title("Connect Google Drive")
+            .message("Enter your vault password. It encrypts your notes before they leave this phone.")
+            .field("Vault password", password = true)
+            .confirm("Connect") { (pw) ->
                 if (Vault.checkPassword(this, pw)) runSync(pw)
                 else Toast.makeText(this, "Wrong vault password", Toast.LENGTH_SHORT).show()
-            }
-            .setNegativeButton("Cancel", null)
-            .show()
+            }.show()
     }
 
     private fun runSync(password: String?) {

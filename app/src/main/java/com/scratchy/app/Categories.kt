@@ -1,10 +1,7 @@
 package com.scratchy.app
 
 import android.app.Activity
-import android.app.AlertDialog
 import android.content.Context
-import android.text.InputType
-import android.widget.EditText
 import android.widget.Toast
 
 /**
@@ -84,27 +81,19 @@ object Categories {
     // ---- dialogs ----
 
     private fun ask(a: Activity, title: String, initial: String, ok: String, onOk: (String) -> Unit) {
-        val input = EditText(a).apply {
-            setText(initial); setSelection(text.length); hint = "Category name"
-            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
-            setSingleLine(true)
-            filters = arrayOf(android.text.InputFilter.LengthFilter(MAX))
-        }
-        val box = android.widget.FrameLayout(a).apply { setPadding(a.dp(22), a.dp(8), a.dp(22), 0); addView(input) }
-        AlertDialog.Builder(a).setTitle(title).setView(box)
-            .setPositiveButton(ok) { _, _ -> clean(input.text.toString()).takeIf { it.isNotEmpty() }?.let(onOk) }
-            .setNegativeButton("Cancel", null).show()
+        Sheet(a).title(title).field("Category name", initial, maxLength = MAX)
+            .confirm(ok) { v -> clean(v[0]).takeIf { it.isNotEmpty() }?.let(onOk) }.show()
     }
 
     /** Pick, create, suggest with AI, or clear the category of one note. [apply] gets the chosen name ("" = none). */
     fun pick(a: Activity, current: String, note: Note, apply: (String) -> Unit) {
         val existing = names(a)
-        val labels = ArrayList<String>(); val actions = ArrayList<() -> Unit>()
-        existing.forEach { n -> labels += if (n == current) "✓  $n" else n; actions += { apply(n) } }
-        labels += "＋  New category…"; actions += {
+        val s = Sheet(a).title("Category")
+        existing.forEach { n -> s.item(n, checked = n == current) { apply(n) } }
+        s.item("＋  New category", accent = true) {
             ask(a, "New category", "", "Add") { apply(canonical(it, existing)) }
         }
-        labels += "✦  Suggest with AI"; actions += {
+        s.item("✦  Suggest with AI", accent = true) {
             if (!Ai.configured(a)) Toast.makeText(a, "Add your OpenRouter key in Settings first", Toast.LENGTH_LONG).show()
             else {
                 Toast.makeText(a, "Thinking…", Toast.LENGTH_SHORT).show()
@@ -114,19 +103,17 @@ object Categories {
                 }
             }
         }
-        if (current.isNotEmpty()) { labels += "No category"; actions += { apply("") } }
-        AlertDialog.Builder(a).setTitle("Category").setItems(labels.toTypedArray()) { _, i -> actions[i]() }
-            .setNegativeButton("Cancel", null).show()
+        if (current.isNotEmpty()) s.item("No category") { apply("") }
+        s.show()
     }
 
     /** Rename or remove a category (long press on its chip). */
     fun manage(a: Activity, name: String, changed: () -> Unit) {
-        AlertDialog.Builder(a).setTitle(name).setItems(arrayOf("Rename", "Remove category")) { _, i ->
-            if (i == 0) ask(a, "Rename category", name, "Rename") { rename(a, name, it); changed() }
-            else AlertDialog.Builder(a).setTitle("Remove \"$name\"?")
-                .setMessage("The notes stay, they just lose this category.")
-                .setPositiveButton("Remove") { _, _ -> remove(a, name); changed() }
-                .setNegativeButton("Cancel", null).show()
-        }.setNegativeButton("Cancel", null).show()
+        Sheet(a).title(name)
+            .item("Rename") { ask(a, "Rename category", name, "Rename") { rename(a, name, it); changed() } }
+            .item("Remove category") {
+                Sheet(a).title("Remove \"$name\"?").message("The notes stay, they just lose this category.")
+                    .confirm("Remove", danger = true) { remove(a, name); changed() }.show()
+            }.show()
     }
 }
