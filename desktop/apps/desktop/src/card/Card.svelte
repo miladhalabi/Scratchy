@@ -2,7 +2,8 @@
   import { flushSync, onMount } from "svelte";
   import { invoke } from "@tauri-apps/api/core";
   import { listen } from "@tauri-apps/api/event";
-  import { fixedColors, pickCardNote, type Note } from "@scratchy/core";
+  import { canonical, fixedColors, pickCardNote, type Note } from "@scratchy/core";
+  import RichEditor from "../lib/editor/RichEditor.svelte";
   import { LocalStore } from "../lib/localStore";
   import { Genie, nearestEdge } from "./genie";
   import { Spring, Tracker, accelDecel, clamp, decelerate, easeOut, project } from "./motion";
@@ -16,12 +17,13 @@
   let phase: Phase = "closed";
   let pinned = $state(false);
   let title = $state("");
-  let body = $state("");
+  /** The body as the phone would write it back: an untouched note keeps its exact original text. */
+  let canon = "";
   let note: Note | null = null;
 
   let root: HTMLDivElement;
   let cardEl: HTMLDivElement;
-  let bodyEl: HTMLTextAreaElement;
+  let editor: RichEditor;
 
   // Where the card is drawn. Plain numbers, written straight to the style: no re-render per frame.
   let x = 0, y = 0, w = 400, h = 460;
@@ -67,7 +69,10 @@
   async function save() {
     clearTimeout(saveTimer);
     if (!note) return;
+    const md = editor.markdown();
+    const body = md === canon ? note.body : md;
     if (note.title === title && note.body === body) return;
+    canon = md;
     note = await store.save({ ...note, title, body, updatedAt: Date.now() });
     prefs.lastCardNote = note.id;
     prefs.lastCardAt = Date.now();
@@ -80,7 +85,8 @@
     note = p.note;
     if (p.create) { store.save(p.note).then((n) => { note = n; prefs.scratchId = n.id; saveCard(prefs); }); }
     title = note.title;
-    body = note.body;
+    canon = canonical(note.body);
+    editor.load(note.body);
   }
 
   // ---- open and close ----
@@ -110,7 +116,7 @@
   function stripsFor(sw = W(), sh = H()): Genie {
     const r = { x, y, w, h };
     const { edge, tx, ty } = nearestEdge(r, sw, sh);
-    const key = [title, body, Math.round(w), Math.round(h), colors.floating, colors.text, pinned, edge === "left" || edge === "right"].join("|");
+    const key = [title, editor.markdown(), Math.round(w), Math.round(h), colors.floating, colors.text, pinned, edge === "left" || edge === "right"].join("|");
     if (genie && genie.key === key) { genie.retarget(r, edge, tx, ty); return genie; }
     genie?.clear();
     genie = new Genie(root, r, edge, tx, ty);
@@ -174,7 +180,7 @@
     genie?.hide();
     place();
     phase = "open";
-    bodyEl.focus({ preventScroll: true });
+    editor.focus(true);
   }
 
   function close() {
@@ -294,7 +300,7 @@
     remember();
     invoke("card_keyboard", { exclusive: !pinned }).catch(() => {});
     syncInput();
-    if (!pinned) bodyEl.focus({ preventScroll: true });
+    if (!pinned) editor.focus(true);
   }
 
   function outside(e: PointerEvent) {
@@ -347,7 +353,7 @@
       </button>
     </div>
     <input class="title" placeholder="Title" bind:value={title} oninput={typed} dir="auto" spellcheck="false" />
-    <textarea class="body" bind:this={bodyEl} bind:value={body} oninput={typed} placeholder="Write it down…" dir="auto"></textarea>
+    <RichEditor bind:this={editor} class="body" placeholder="Write it down…" onchange={typed} />
     {#each ["n", "s", "e", "w", "ne", "nw", "se", "sw"] as d}
       <!-- svelte-ignore a11y_no_static_element_interactions -->
       <div class="rz {d}" data-dir={d} onpointerdown={resizeStart} onpointermove={resizeMove} onpointerup={resizeEnd} onpointercancel={resizeEnd}></div>
@@ -392,13 +398,14 @@
   .icon:hover { background: var(--wash); color: var(--text); }
   .icon:active { transform: scale(0.94); }
   .icon.on { color: var(--accent); }
-  .title, .body {
+  .title {
     border: 0; outline: 0; background: transparent; color: var(--text); font: inherit;
     padding: 0 20px; box-sizing: border-box; width: 100%;
   }
   .title { flex: none; font-size: 19px; font-weight: 650; letter-spacing: -0.01em; padding-top: 2px; padding-bottom: 6px; }
-  .body { flex: 1; resize: none; padding-bottom: 18px; caret-color: var(--accent); }
-  .title::placeholder, .body::placeholder { color: var(--secondary); opacity: 0.7; }
+  .card :global(.body) { flex: 1; }
+  .card :global(.body .rich) { padding: 0 20px 18px; }
+  .title::placeholder { color: var(--secondary); opacity: 0.7; }
   .rz { position: absolute; z-index: 2; touch-action: none; }
   .n, .s { left: 14px; right: 14px; height: 6px; cursor: ns-resize; }
   .n { top: 0; } .s { bottom: 0; }

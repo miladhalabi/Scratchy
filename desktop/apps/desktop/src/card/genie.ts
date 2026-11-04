@@ -82,7 +82,7 @@ export class Genie {
     const { w, h } = this.r;
     const step = (this.across ? w : h) / n;
     // Scrolled text areas don't keep their scroll position in a copy.
-    const scrolls = [...card.querySelectorAll<HTMLElement>("textarea, .scroll")].map((e) => e.scrollTop);
+    const scrolls = [...card.querySelectorAll<HTMLElement>(".scroll")].map((e) => e.scrollTop);
     const proto = card.cloneNode(true) as HTMLElement;
     proto.removeAttribute("id");
     proto.classList.add("copy");
@@ -105,7 +105,7 @@ export class Genie {
     this.root.appendChild(layer);
     this.layer = layer;
     // Scroll positions only stick once the copies are in the page.
-    for (const s of this.strips) [...s.querySelectorAll<HTMLElement>(".body.as-text, .scroll")].forEach((e, j) => { e.scrollTop = scrolls[j] ?? 0; });
+    for (const s of this.strips) [...s.querySelectorAll<HTMLElement>(".scroll")].forEach((e, j) => { e.scrollTop = scrolls[j] ?? 0; });
   }
 
   /** t = 0: the card as it is; t = 1: sucked into the edge. */

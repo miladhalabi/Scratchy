@@ -220,6 +220,10 @@ fn card_boot(app: AppHandle) {
     if overlay::OPEN_ON_BOOT.swap(false, std::sync::atomic::Ordering::SeqCst) { overlay::toggle(&app) }
 }
 
+/// Errors from the pages, printed with the app's own output.
+#[tauri::command]
+fn log(line: String) { eprintln!("[page] {line}"); }
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     let toggle = args.iter().any(|a| a == "--toggle");
@@ -240,7 +244,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             read_text, write_text, remove_text, read_attachment, write_attachment, has_attachment, data_path,
             google_client, oauth_start, oauth_wait, open_url, secret_get, secret_set, secret_delete,
-            card_hide, card_input, card_keyboard, card_boot
+            card_hide, card_input, card_keyboard, card_boot, log
         ])
         .setup(|app| {
             let h = app.handle().clone();
