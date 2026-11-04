@@ -9,7 +9,7 @@ use std::{
 };
 mod overlay;
 mod remote;
-use tauri::{AppHandle, Manager, State, WindowEvent};
+use tauri::{AppHandle, Manager, State};
 
 /// Only plain file names: no folders, no "..", nothing hidden.
 fn safe(name: &str) -> Result<(), String> {
@@ -220,6 +220,20 @@ fn card_boot(app: AppHandle) {
     if overlay::OPEN_ON_BOOT.swap(false, std::sync::atomic::Ordering::SeqCst) { overlay::toggle(&app) }
 }
 
+/// The notes window: made when it is asked for and really closed when you close it (the notes engine lives in
+/// the card's window, so nothing is lost).
+pub fn open_main(app: &AppHandle) {
+    let a = app.clone();
+    let _ = app.run_on_main_thread(move || {
+        if let Some(w) = a.get_webview_window("main") { let _ = w.show(); let _ = w.unminimize(); let _ = w.set_focus(); return; }
+        let _ = tauri::WebviewWindowBuilder::new(&a, "main", tauri::WebviewUrl::App("index.html?w=main".into()))
+            .title("Scratchy").inner_size(1040.0, 740.0).min_inner_size(420.0, 480.0).build();
+    });
+}
+
+#[tauri::command]
+fn show_main(app: AppHandle) { open_main(&app) }
+
 /// Errors from the pages, printed with the app's own output.
 #[tauri::command]
 fn log(line: String) { eprintln!("[page] {line}"); }
@@ -227,6 +241,8 @@ fn log(line: String) { eprintln!("[page] {line}"); }
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     let toggle = args.iter().any(|a| a == "--toggle");
+    // Started at login: stay in the background until the shortcut or the tray is used.
+    let background = args.iter().any(|a| a == "--background");
     // A second launch (the Hyprland keybinding) hands the request to the running app and quits at once.
     if remote::send(if toggle { "toggle" } else { "show" }) { return; }
     if toggle { overlay::OPEN_ON_BOOT.store(true, std::sync::atomic::Ordering::SeqCst); }
@@ -244,18 +260,14 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             read_text, write_text, remove_text, read_attachment, write_attachment, has_attachment, data_path,
             google_client, oauth_start, oauth_wait, open_url, secret_get, secret_set, secret_delete,
-            card_hide, card_input, card_keyboard, card_boot, log
+            card_hide, card_input, card_keyboard, card_boot, show_main, log
         ])
-        .setup(|app| {
+        .setup(move |app| {
             let h = app.handle().clone();
             overlay::setup(&h);
+            if !toggle && !background { open_main(&h); }
             remote::listen(h);
             Ok(())
-        })
-        .on_window_event(|w, e| {
-            if let WindowEvent::CloseRequested { api, .. } = e {
-                if w.label() == "main" { api.prevent_close(); let _ = w.hide(); }
-            }
         })
         .run(tauri::generate_context!())
         .expect("error while running Scratchy");

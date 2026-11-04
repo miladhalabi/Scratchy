@@ -4,7 +4,7 @@
   import { listen } from "@tauri-apps/api/event";
   import { canonical, fixedColors, pickCardNote, type Note } from "@scratchy/core";
   import RichEditor from "../lib/editor/RichEditor.svelte";
-  import { LocalStore } from "../lib/localStore";
+  import { startEngine, store } from "../lib/engine";
   import { Genie, nearestEdge } from "./genie";
   import { Spring, Tracker, accelDecel, clamp, decelerate, easeOut, project } from "./motion";
   import { loadCard, saveCard, type CardState } from "./prefs";
@@ -12,7 +12,6 @@
   type Phase = "closed" | "opening" | "open" | "closing";
 
   const MIN_W = 280, MIN_H = 220, MARGIN = 8;
-  const store = new LocalStore();
   let prefs: CardState;
   let phase: Phase = "closed";
   let pinned = $state(false);
@@ -319,7 +318,7 @@
       w = prefs.w; h = prefs.h;
       x = prefs.x ?? W() - w - 48;
       y = prefs.y ?? (H() - h) / 2;
-      await store.load();
+      await startEngine();
       // Ready before the first open: the note it would open on, already cut into genie strips.
       pick(); flushSync(); fit(); place();
       if (prefs.anim === "genie") stripsFor().hide();

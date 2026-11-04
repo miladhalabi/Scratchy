@@ -1,7 +1,7 @@
 //! `scratchy --toggle` from a keybinding: the new process hands the request to the running app over a local socket
 //! and exits before any window or webview starts, so the shortcut feels instant.
 
-use tauri::{AppHandle, Manager};
+use tauri::AppHandle;
 
 #[cfg(unix)]
 fn path() -> std::path::PathBuf {
@@ -31,7 +31,7 @@ pub fn listen(app: AppHandle) {
             if BufReader::new(s).read_line(&mut line).is_err() { continue; }
             match line.trim() {
                 "toggle" => crate::overlay::toggle(&app),
-                _ => if let Some(w) = app.get_webview_window("main") { let _ = w.show(); let _ = w.set_focus(); },
+                _ => crate::open_main(&app),
             }
         }
     });

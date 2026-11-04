@@ -1,5 +1,6 @@
 import { mount } from "svelte";
 import Card from "./card/Card.svelte";
+import Main from "./main/Main.svelte";
 import { invoke } from "@tauri-apps/api/core";
 
 // Page errors go to the app's output, where they can be seen.
@@ -8,5 +9,5 @@ addEventListener("error", (e) => report(`${e.message} at ${e.filename}:${e.linen
 addEventListener("unhandledrejection", (e) => report(`unhandled: ${e.reason?.stack ?? e.reason}`));
 
 const which = new URLSearchParams(location.search).get("w");
-// Only the card for now; the notes window comes next.
-export default which === "card" || !which ? mount(Card, { target: document.getElementById("app")! }) : null;
+const target = document.getElementById("app")!;
+export default which === "main" ? mount(Main, { target }) : mount(Card, { target });
