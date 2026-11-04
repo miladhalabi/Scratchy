@@ -123,10 +123,19 @@ class OverlayService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_STOP) {
+            KeepAlive.setWanted(this, false)
             stopSelf()
             return START_NOT_STICKY
         }
+        KeepAlive.setWanted(this, true)
+        startAsForeground()     // every foreground start must confirm it, even when the bar is already up
         return START_STICKY
+    }
+
+    /** Cleared from recent apps. Some phones kill the whole app right after; ask to be started again. */
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        if (KeepAlive.wanted(this)) KeepAlive.scheduleRestart(this)
+        super.onTaskRemoved(rootIntent)
     }
 
     override fun onDestroy() {

@@ -248,6 +248,11 @@ class SettingsActivity : Activity() {
                 })
                 caption(pal, "Move the bar in if your screen protector covers it.")
             }
+            row {
+                title(pal, "Keep it running")
+                caption(pal, "If the bar disappears when you clear recent apps, allow Autostart and remove battery restrictions.")
+                pressable(0.99f) { KeepAlive.showSetup(this@SettingsActivity) }
+            }
         })
     }
 

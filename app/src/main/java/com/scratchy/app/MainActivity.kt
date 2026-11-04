@@ -34,6 +34,7 @@ class MainActivity : Activity() {
     private lateinit var toggle: TextView
     private lateinit var permission: TextView
     private lateinit var photoAccess: TextView
+    private lateinit var keepAlive: TextView
     private var photoDenied = false
     private lateinit var search: EditText
     private lateinit var notes: LinearLayout
@@ -129,6 +130,14 @@ class MainActivity : Activity() {
             }
         }
         if (!secretMode) column.addView(photoAccess)
+
+        keepAlive = TextView(this).apply {
+            text = "Keep the edge bar running when you clear recent apps"
+            textSize = 14f; setTextColor(pal.accent)
+            setPadding(dp(2), 0, 0, dp(14))
+            setOnClickListener { KeepAlive.showSetup(this@MainActivity) }
+        }
+        if (!secretMode) column.addView(keepAlive)
 
         // Search field.
         val searchRow = LinearLayout(this).apply {
@@ -327,6 +336,7 @@ class MainActivity : Activity() {
         val on = OverlayService.running
         permission.visibility = if (canDraw) View.GONE else View.VISIBLE
         photoAccess.visibility = if (Screenshots.hasAccess(this)) View.GONE else View.VISIBLE
+        keepAlive.visibility = if (canDraw && on && KeepAlive.needsSetup(this)) View.VISIBLE else View.GONE
         toggle.text = if (on) "Edge bar on" else "Edge bar off"
         toggle.setTextColor(if (on) pal.text else pal.onAccent)
         toggle.background = roundRect(
