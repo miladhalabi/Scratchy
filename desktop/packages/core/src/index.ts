@@ -10,4 +10,5 @@ export * from "./theme";
 export * from "./vault";
 export * from "./cardNote";
 export * from "./markdown";
+export * from "./richtext";
 export * from "./categories";
