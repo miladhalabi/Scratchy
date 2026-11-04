@@ -106,9 +106,13 @@ class BarView(ctx: Context) : View(ctx) {
         ValueAnimator.ofFloat(0f, 1f).apply {
             duration = if (strong) 1100L else 2400L
             interpolator = AccelerateDecelerateInterpolator()
+            // A slow breath looks the same at 30 frames a second, and every frame drawn makes the phone
+            // recompose the whole screen, so it redraws at most every ~33 ms.
+            var drawnAt = 0L
             addUpdateListener {
                 breath = sin(Math.PI * (it.animatedValue as Float)).toFloat() * (if (strong) 1f else 0.7f)
-                invalidate()
+                val now = android.os.SystemClock.uptimeMillis()
+                if (now - drawnAt >= 33) { drawnAt = now; invalidate() }
             }
             addListener(object : android.animation.AnimatorListenerAdapter() {
                 override fun onAnimationEnd(animation: android.animation.Animator) { breath = 0f; invalidate() }

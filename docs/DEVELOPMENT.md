@@ -61,7 +61,13 @@ Requirements: JDK 17+, Android SDK (platform 35), a device with USB debugging.
 adb install -r app/build/outputs/apk/release/app-release.apk
 ```
 
-The release build is minified (R8) and signed with the local debug keystore (`~/.config/.android/debug.keystore`), so it upgrades over debug installs and keeps your data. Installing stops the edge bar service; turn it back on from the notes screen.
+The release build is minified (R8) and signed with the local debug keystore (`~/.config/.android/debug.keystore`), so it upgrades over debug installs and keeps your data. After an update the edge bar comes back by itself if it was on (`BootReceiver`).
+
+An adb install starts uncompiled (`status=verify`), so the card is slower until the phone's overnight optimization runs. The app ships a startup profile (`app/src/main/baseline-prof.txt`, installed by `androidx.profileinstaller`); before measuring performance, compile with it right away, then restart the app:
+
+```bash
+adb shell cmd package compile -m speed-profile -f com.scratchy.app
+```
 
 First run: allow **Display over other apps** and photo access (for screenshots), then switch the edge bar on.
 

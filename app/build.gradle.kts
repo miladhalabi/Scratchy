@@ -48,5 +48,7 @@ dependencies {
     implementation("com.google.android.gms:play-services-auth:21.2.0")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("androidx.work:work-runtime:2.9.1")
+    // Installs the startup profile below, so Android compiles the card and bar code ahead of time.
+    implementation("androidx.profileinstaller:profileinstaller:1.4.0")
     testImplementation("junit:junit:4.13.2")
 }

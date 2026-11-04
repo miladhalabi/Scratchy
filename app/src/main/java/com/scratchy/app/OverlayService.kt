@@ -146,6 +146,7 @@ class OverlayService : Service() {
         contentResolver.unregisterContentObserver(shotObserver)
         main.removeCallbacks(tuckRunnable)
         main.removeCallbacks(breathRunnable)
+        runCatching { unregisterReceiver(screenOn) }
         main.removeCallbacks(pendingPulse)
         main.removeCallbacks(expirePending)
         main.removeCallbacks(clearPending)
@@ -340,7 +341,9 @@ class OverlayService : Service() {
         }
         wm.addView(zone, zoneParams)
         scheduleTuck(2000)
-        main.postDelayed(breathRunnable, 6_000)
+        wakeBreathing()
+        val on = android.content.IntentFilter(Intent.ACTION_SCREEN_ON)
+        if (Build.VERSION.SDK_INT >= 33) registerReceiver(screenOn, on, RECEIVER_NOT_EXPORTED) else registerReceiver(screenOn, on)
         schedulePrepare(1500)
     }
 
@@ -400,14 +403,26 @@ class OverlayService : Service() {
         if (pendingShot != null) bar.tuckAway(partial = true) else bar.tuckAway()
     }
 
-    // ---- idle breathing: one slow breath now and then, never a constant animation ----
+    // ---- idle breathing: a few slow breaths after the screen turns on or the card closes, then still ----
 
+    private var breathsLeft = 0
     private val breathRunnable = object : Runnable {
         override fun run() {
             val interactive = (getSystemService(POWER_SERVICE) as android.os.PowerManager).isInteractive
-            if (!panelOpen && interactive) bar.breatheOnce(strong = false)
-            main.postDelayed(this, 11_000)
+            if (!interactive || breathsLeft <= 0) return     // the screen turning on starts them again
+            if (!panelOpen) { bar.breatheOnce(strong = false); breathsLeft-- }
+            if (breathsLeft > 0) main.postDelayed(this, 11_000)
         }
+    }
+
+    private fun wakeBreathing(delay: Long = 6_000) {
+        breathsLeft = 3
+        main.removeCallbacks(breathRunnable)
+        main.postDelayed(breathRunnable, delay)
+    }
+
+    private val screenOn = object : android.content.BroadcastReceiver() {
+        override fun onReceive(c: Context, i: Intent) { wakeBreathing(3_000) }
     }
 
     // ---- while a screenshot is waiting the bar pulses green and sends out a ring now and then ----
@@ -471,7 +486,6 @@ class OverlayService : Service() {
 
     /** Tap or inward swipe on the bar: open the card, or close it if it is already open. */
     private fun toggleCard() {
-        Perf.start(if (panel != null) "close" else "open")
         if (panel != null) collapse() else expand()
     }
 
@@ -489,13 +503,10 @@ class OverlayService : Service() {
         if (pendingShot == null) bar.setTint(pal.accent)
         panelOpen = true
         main.removeCallbacks(tuckRunnable); main.removeCallbacks(prepareCard)
-        Perf.mark("setup")
         val (startNote, continuing) = CardNote.pick(this)
-        Perf.mark("pick note")
         val ready = prepared?.takeIf { it.key == cardKey() }
         prepared = null
         val c = ready ?: buildCard(startNote)
-        Perf.mark(if (ready != null) "card was ready" else "card built")
         c.show(startNote, continuing)
     }
 
@@ -540,9 +551,7 @@ class OverlayService : Service() {
             .coerceIn(minH, screenH - topLimit - margin * 2)
 
         val ed = NoteEditor(ui, pal, startNote, compact = true) {
-            val t0 = android.os.SystemClock.uptimeMillis()
             NoteStore.save(this, it)
-            android.util.Log.i("ScratchyPerf", "autosave ${android.os.SystemClock.uptimeMillis() - t0} ms")
             if (!it.isBlank) CardNote.remember(this, it.id)
         }
 
@@ -891,13 +900,7 @@ class OverlayService : Service() {
                 lp.softInputMode = WindowManager.LayoutParams.SOFT_INPUT_STATE_UNCHANGED or
                     WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING
             }
-            Perf.mark("note loaded")
-            p.viewTreeObserver.addOnDrawListener(object : android.view.ViewTreeObserver.OnDrawListener {
-                var seen = false
-                override fun onDraw() { if (!seen) { seen = true; Perf.mark("first draw") } }
-            })
             wm.addView(p, lp)
-            Perf.mark("window added")
             panel = p
             // The bar stays visible while the card is open, and tapping it closes the card. Windows stack in
             // the order they were added, so put the bar back on top of the card and the catcher.
@@ -945,16 +948,14 @@ class OverlayService : Service() {
             if (genieOpen) {
                 // Grow out of the bar: snapshot the laid-out card, play the genie backwards, then reveal it.
                 afterFirstLayout(p) {
-                    Perf.mark("laid out")
                     val bmp = capture(p)
-                    Perf.mark("snapshot")
                     val loc = IntArray(2); p.getLocationOnScreen(loc)
                     if (blurPx > 0) animateBlur(p, lp, 0, blurPx, genieMs(420))
                     runGenie(bmp, loc[0], loc[1], opening = true, live = p,
                         cardAlpha = Appearance.opacity(this) / 100f) {
                         if (panel === p) {                // not if it was closed while growing
                             raiseBar()
-                            if (typing) { askKeyboard(); Perf.mark("keyboard asked") }
+                            if (typing) askKeyboard()
                         }
                     }
                 }
@@ -969,7 +970,6 @@ class OverlayService : Service() {
                 ed.bodyEdit.requestFocus()
                 if (!genieOpen) main.postDelayed({ askKeyboard() }, 120)
             }
-            Perf.mark("open done (main thread free)")
         }
     }
 
@@ -1043,7 +1043,6 @@ class OverlayService : Service() {
         removeDismissCatcher()
         Sync.onChangedCard = null
         editor?.commit()
-        Perf.mark("saved")
         editor = null
         (getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager)
             .hideSoftInputFromWindow(p.windowToken, 0)
@@ -1069,13 +1068,13 @@ class OverlayService : Service() {
             applySideFromPrefs()
             scheduleTuck()
             schedulePrepare(150)
+            wakeBreathing()
         }
         val style = animStyle()
         when {
             reduced || style == "none" -> { removePanel(); done() }
             style == "genie" -> {
                 val bmp = capture(p)
-                Perf.mark("snapshot")
                 val loc = IntArray(2); p.getLocationOnScreen(loc)
                 runGenie(bmp, loc[0], loc[1], opening = false, live = p,
                     cardAlpha = Appearance.opacity(this) / 100f) {
@@ -1138,20 +1137,14 @@ class OverlayService : Service() {
     /** Eases the window's blur radius so it never pops on or off. */
     private fun animateBlur(view: View, lp: WindowManager.LayoutParams, from: Int, to: Int, ms: Long, onEnd: (() -> Unit)? = null) {
         if (Build.VERSION.SDK_INT < 31) { onEnd?.invoke(); return }
-        var updates = 0; var spent = 0L; var worst = 0L
         ValueAnimator.ofInt(from, to).apply {
             duration = ms
             addUpdateListener {
-                val t = System.nanoTime()
                 lp.blurBehindRadius = it.animatedValue as Int
                 runCatching { wm.updateViewLayout(view, lp) }
-                val d = System.nanoTime() - t; updates++; spent += d; worst = maxOf(worst, d)
             }
             addListener(object : AnimatorListenerAdapter() {
-                override fun onAnimationEnd(animation: Animator) {
-                    android.util.Log.i("ScratchyPerf", "blur $from->$to: $updates updates, ${spent / 1_000_000} ms on the main thread, worst ${worst / 1_000_000} ms")
-                    onEnd?.invoke()
-                }
+                override fun onAnimationEnd(animation: Animator) { onEnd?.invoke() }
             })
             start()
         }
@@ -1201,9 +1194,6 @@ class OverlayService : Service() {
         ).apply { gravity = Gravity.TOP or Gravity.LEFT }
         wm.addView(gv, glp)
         genieViews.add(gv)
-        Perf.mark("genie window added")
-        var frames = 0; var lastFrame = 0L; var worstGap = 0L
-        val genieStart = android.os.SystemClock.uptimeMillis()
 
         // Crossfade between the snapshot and the live card (see GenieView.snapshotShare). The live
         // card's visibility is eased so it is nearly complete early; the snapshot's share only drops
@@ -1239,17 +1229,11 @@ class OverlayService : Service() {
             duration = genieMs(if (opening) 420 else 480)
             interpolator = if (opening) DecelerateInterpolator(1.3f) else AccelerateDecelerateInterpolator()
             addUpdateListener {
-                frames++
-                val now = System.nanoTime()
-                if (lastFrame > 0) worstGap = maxOf(worstGap, now - lastFrame)
-                lastFrame = now
                 val a = it.animatedValue as Float
                 gv.t = if (opening) 1f - a else a
             }
             addListener(object : AnimatorListenerAdapter() {
                 override fun onAnimationEnd(animation: Animator) {
-                    val ms = android.os.SystemClock.uptimeMillis() - genieStart
-                    Perf.mark("genie end: $frames frames in $ms ms (${frames * 1000 / ms.coerceAtLeast(1)} fps), longest frame ${worstGap / 1_000_000} ms")
                     onEnd()
                     if (opening) crossfade(true, 260) { live.alpha = 1f; main.postDelayed({ removeSnapshot() }, 16) }
                     else main.postDelayed({ removeSnapshot() }, 16)
@@ -1286,15 +1270,3 @@ class OverlayService : Service() {
     }
 }
 
-/** Temporary: timings of the card's open and close steps, no note content. */
-internal object Perf {
-    private var t0 = 0L
-    private var last = 0L
-    private var what = ""
-    fun start(w: String) { what = w; t0 = android.os.SystemClock.uptimeMillis(); last = t0 }
-    fun mark(step: String) {
-        val now = android.os.SystemClock.uptimeMillis()
-        android.util.Log.i("ScratchyPerf", "$what  +${now - last} ms  (${now - t0} ms total)  $step")
-        last = now
-    }
-}

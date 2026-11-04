@@ -1,0 +1,6 @@
+# Code Android should compile ahead of time instead of interpreting it at first: the whole app is small,
+# so all of it, plus the spring library the edge bar and card move with.
+HSPLcom/scratchy/app/**;->**(**)**
+Lcom/scratchy/app/**;
+HSPLandroidx/dynamicanimation/animation/**;->**(**)**
+Landroidx/dynamicanimation/animation/**;
