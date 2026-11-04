@@ -1,0 +1,6 @@
+node_modules/
+target/
+.env.local
+.local/
+.libjxl12/
+dist/
