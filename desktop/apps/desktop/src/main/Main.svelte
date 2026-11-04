@@ -1,18 +1,21 @@
 <script lang="ts">
   import { onMount, tick } from "svelte";
-  import { canonicalCategory, categoryNames, cleanCategory, CATEGORY_MAX, newNote, noteHeading, plain, type Note } from "@scratchy/core";
+  import { canonicalCategory, categoryNames, cleanCategory, CATEGORY_MAX, newNote, plain, type Note } from "@scratchy/core";
   import { notes } from "../lib/notes";
   import type { SyncStatus } from "../lib/sync";
-  import { preview } from "../lib/preview";
+  import { cardHeading, cardPreview, render } from "../lib/preview";
   import { applyTheme } from "../lib/theme";
+  import Icon from "../lib/Icon.svelte";
   import Sheet, { type SheetItem } from "../lib/Sheet.svelte";
   import NotePage from "./NotePage.svelte";
   import Settings from "./Settings.svelte";
   import VaultGate from "./VaultGate.svelte";
   import Thumb from "./Thumb.svelte";
+  import { formatWhen } from "./when";
+  import "../lib/base.css";
   import "../lib/editor/editor.css";
 
-  /** The notes window: the grid, search and categories, and the full editor for one note at a time. */
+  /** The notes window, laid out like the phone's MainActivity: title, status, search, category chips, two-up cards. */
   applyTheme();
   // Every component's styles end up in one sheet shared with the see-through card window, so the page styles key off this.
   document.documentElement.classList.add("notes");
@@ -20,7 +23,8 @@
   let all: Note[] = $state([]);
   let ready = $state(false);
   let query = $state("");
-  let filter = $state("");
+  /** null: every note; "": the ones with no category; otherwise one category. */
+  let filter: string | null = $state(null);
   /** The note open in the editor; a new one lives only here until it has something in it. */
   let open: Note | null = $state(null);
   let undo: { note: Note; timer: ReturnType<typeof setTimeout> } | null = $state(null);
@@ -37,30 +41,41 @@
   let notice: { text: string; timer: ReturnType<typeof setTimeout> } | null = $state(null);
 
   const visible = $derived(all.filter((n) => n.secret === secret));
-  const categories = $derived(categoryNames(all.filter((n) => !n.secret)));
+  const plainNotes = $derived(all.filter((n) => !n.secret));
+  const categories = $derived(categoryNames(plainNotes));
+  const uncategorized = $derived(plainNotes.filter((n) => !n.category.trim()).length);
   const shown = $derived.by(() => {
     const q = query.trim().toLowerCase();
     return visible
-      .filter((n) => secret || !filter || n.category === filter)
+      .filter((n) => secret || filter == null || n.category === filter)
       .filter((n) => !q || n.title.toLowerCase().includes(q) || n.body.split("\n").map(plain).join("\n").toLowerCase().includes(q) || n.category.toLowerCase().includes(q))
       .sort((a, b) => Number(b.pinned) - Number(a.pinned) || b.updatedAt - a.updatedAt);
   });
-  const cols = $derived(Math.max(1, Math.min(5, Math.floor((width - 32) / 250))));
-  /** Notes dealt across the columns left to right, so reading order stays row by row. */
+  // Two columns like the phone; more when the window is wide.
+  const GAP = 10;
+  const cols = $derived(Math.max(2, Math.min(6, Math.floor((width - 40 + GAP) / (230 + GAP)))));
+  /** Rough card height, only used to balance the columns (estimateHeight on the phone). */
+  const estimate = (n: Note) => {
+    const p = cardPreview(n);
+    return 90 + Math.min(6, Math.floor(p.length / 18) + (p.match(/\n/g)?.length ?? 0)) * 22 + (n.images.length ? 130 : 0);
+  };
+  /** Each note goes to the shorter column, so cards of different heights pack neatly. */
   const columns = $derived.by(() => {
     const out: Note[][] = Array.from({ length: cols }, () => []);
-    shown.forEach((n, i) => out[i % cols].push(n));
+    const h = new Array(cols).fill(0);
+    for (const n of shown) { const i = h.indexOf(Math.min(...h)); h[i] += estimate(n); out[i].push(n); }
     return out;
   });
   /** The open note as the store has it now (another device may have changed it), or the new one. */
   const live = $derived(open ? (all.find((n) => n.id === open!.id) ?? open) : null);
 
-  $effect(() => { if (filter && !categories.includes(filter)) filter = ""; });
+  $effect(() => { if (filter && !categories.includes(filter)) filter = null; });
 
   function create() {
     menu = null;
-    open = { ...newNote(crypto.randomUUID()), secret, category: secret ? "" : filter };
+    open = { ...newNote(crypto.randomUUID()), secret, category: secret ? "" : filter ?? "" };
   }
+  function edit(n: Note) { menu = null; open = n; }
 
   // ---- the vault ----
 
@@ -77,7 +92,8 @@
   }
   function blurred() { if (secret) { clearTimeout(away); away = setTimeout(lock, GRACE_MS); } }
   function focused() { clearTimeout(away); notes.seen().catch(() => {}); }
-  function edit(n: Note) { menu = null; open = n; }
+
+  // ---- delete with undo ----
 
   function remove(n: Note) {
     menu = null;
@@ -85,7 +101,7 @@
     if (!all.some((x) => x.id === n.id)) return;           // a new note that was never saved
     if (undo) clearTimeout(undo.timer);
     notes.remove(n.id);
-    undo = { note: n, timer: setTimeout(() => (undo = null), 6000) };
+    undo = { note: n, timer: setTimeout(() => (undo = null), 5000) };
   }
   function restore() {
     if (!undo) return;
@@ -109,7 +125,7 @@
 
   function contextMenu(e: MouseEvent, n: Note) {
     e.preventDefault();
-    menu = { note: n, x: Math.min(e.clientX, innerWidth - 196), y: Math.min(e.clientY, innerHeight - 160) };
+    menu = { note: n, x: Math.min(e.clientX, innerWidth - 196), y: Math.min(e.clientY, innerHeight - 170) };
   }
 
   function keys(e: KeyboardEvent) {
@@ -123,7 +139,7 @@
     else if (e.key === "Escape") {
       if (menu) menu = null;
       else if (query) { query = ""; searchEl.blur(); }
-      else if (filter) filter = "";
+      else if (filter != null) filter = null;
       else if (secret) lock();
     }
   }
@@ -154,92 +170,87 @@
 
 <div class="app">
   {#if live}
-    <NotePage note={live} {categories} onback={back} ondelete={remove} />
+    <NotePage note={live} {categories} {vaultSetUp} onback={back} ondelete={remove} />
   {:else if settings}
     <Settings {sync} {vaultSetUp} onback={() => (settings = false)} />
   {:else}
-    {#if secret}
-      <div class="vaultbar">
-        <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M18 8h-1V6A5 5 0 0 0 7 6v2H6a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V10a2 2 0 0 0-2-2m-6 9a2 2 0 1 1 0-4 2 2 0 0 1 0 4M15.1 8H8.9V6a3.1 3.1 0 0 1 6.2 0z" /></svg>
-        <strong>Secret</strong>
-        <span class="grow"></span>
-        <button onclick={lock}>Lock</button>
+    <div class="column">
+      <div class="titlerow">
+        <h1>{secret ? "Secret" : "Notes"}</h1>
+        {#if secret}
+          <button class="iconbtn accent" onclick={lock} title="Lock now" aria-label="Lock now"><Icon name="lock" size={22} /></button>
+        {:else}
+          <button class="iconbtn" onclick={() => (settings = true)} title="Settings (Ctrl+,)" aria-label="Settings"><Icon name="settings" size={22} /></button>
+        {/if}
       </div>
-    {/if}
-    <header>
-      <div class="search">
-        <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><circle cx="11" cy="11" r="6.5" fill="none" stroke="currentColor" stroke-width="1.8" /><path d="m16 16 4 4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" /></svg>
-        <input bind:this={searchEl} bind:value={query} placeholder={secret ? "Search secret notes" : "Search notes"} spellcheck="false" dir="auto"
+
+      {#if !secret}
+        <div class="status"><span class="dot"></span>Press Super+Alt+N from any app</div>
+        {#if sync.connected}
+          <button class="syncline" class:warn={sync.state === "attention"} onclick={() => (settings = true)}>Sync: {sync.text}</button>
+        {/if}
+      {/if}
+
+      <label class="search">
+        <Icon name="search" size={20} />
+        <input bind:this={searchEl} bind:value={query} placeholder="Search" spellcheck="false" dir="auto"
           onkeydown={(e) => { if (e.key === "ArrowDown" || e.key === "Enter") { e.preventDefault(); document.querySelector<HTMLElement>(".note")?.focus(); } }} />
-        {#if query}<button class="clear" onclick={() => { query = ""; searchEl.focus(); }} aria-label="Clear search">×</button>{/if}
-      </div>
-      <button class="new" onclick={create} title="New note (Ctrl+N)">
-        <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" /></svg>
-        New note
-      </button>
-      <button class="gear" onclick={() => (settings = true)} title="Settings (Ctrl+,)" aria-label="Settings">
-        <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M12 15.2a3.2 3.2 0 1 0 0-6.4 3.2 3.2 0 0 0 0 6.4Z" fill="none" stroke="currentColor" stroke-width="1.7" /><path d="M19.4 13.5a7.6 7.6 0 0 0 0-3l2-1.6-2-3.4-2.4 1a7.6 7.6 0 0 0-2.6-1.5L14 2.5h-4l-.4 2.5A7.6 7.6 0 0 0 7 6.5l-2.4-1-2 3.4 2 1.6a7.6 7.6 0 0 0 0 3l-2 1.6 2 3.4 2.4-1a7.6 7.6 0 0 0 2.6 1.5l.4 2.5h4l.4-2.5a7.6 7.6 0 0 0 2.6-1.5l2.4 1 2-3.4z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" /></svg>
-      </button>
-    </header>
-    {#if sync.connected && !secret}
-      <button class="syncline" class:warn={sync.state === "attention"} onclick={() => (settings = true)}>{sync.text}</button>
-    {/if}
+      </label>
 
-    {#if categories.length && !secret}
-      <div class="chips" role="tablist" aria-label="Categories">
-        <button class="chip" class:on={!filter} role="tab" aria-selected={!filter} onclick={() => (filter = "")}>All</button>
-        {#each categories as c}
-          <button class="chip" class:on={filter === c} role="tab" aria-selected={filter === c} onclick={() => (filter = filter === c ? "" : c)} dir="auto">{c}</button>
-        {/each}
-      </div>
-    {/if}
-
-    <main>
-      {#if !ready}
-        <!-- the first message from the engine is a few milliseconds away -->
-      {:else if !shown.length}
-        <div class="empty">
-          {#if query || filter}
-            <p>Nothing matches.</p>
-          {:else}
-            <p>{secret ? "No secret notes yet." : "No notes yet."}</p>
-            <button class="new" onclick={create}>Write the first one</button>
+      {#if !secret && plainNotes.length}
+        <div class="chips" role="tablist" aria-label="Categories">
+          <button class="chip" class:on={filter == null} role="tab" aria-selected={filter == null} onclick={() => (filter = null)}>All</button>
+          {#each categories as c}
+            <button class="chip" class:on={filter === c} role="tab" aria-selected={filter === c} onclick={() => (filter = c)} dir="auto">{c}</button>
+          {/each}
+          {#if categories.length && uncategorized}
+            <button class="chip" class:on={filter === ""} role="tab" aria-selected={filter === ""} onclick={() => (filter = "")}>None</button>
           {/if}
         </div>
-      {:else}
-        <div class="grid" style="--cols:{cols}">
-          {#each columns as col}
-            <div class="col">
-              {#each col as n (n.id)}
-                <div class="note" class:pinned={n.pinned} data-id={n.id} role="button" tabindex="0" aria-label={noteHeading(n) || "Untitled note"}
-                  onclick={() => edit(n)} onkeydown={(e) => cardKeys(e, n)} oncontextmenu={(e) => contextMenu(e, n)}>
-                  {#if n.images.length}<Thumb name={n.images[0]} />{/if}
-                  <div class="inner">
-                    {#if n.title.trim()}<div class="t" dir="auto">{n.title}</div>{/if}
-                    {#if n.body.trim()}<div class="b">{@html preview(n.body, n.title.trim() ? 9 : 10)}</div>{/if}
-                    {#if n.pinned || (n.category && !filter)}
-                      <div class="meta">
-                        {#if n.category && !filter}<span class="cat" dir="auto">{n.category}</span>{/if}
-                        {#if n.pinned}<svg class="pin" viewBox="0 0 24 24" width="14" height="14" aria-label="Pinned"><path d="M14.5 3.5 20.5 9.5 17 11l-3.5 3.5.5 4-1.5 1.5-3.5-3.5L5 20.5 3.5 19 7.5 15 4 11.5 5.5 10l4 .5L13 7z" fill="currentColor" /></svg>{/if}
+      {/if}
+
+      <main class:nochips={secret || !plainNotes.length}>
+        {#if !ready}
+          <!-- the first message from the engine is a few milliseconds away -->
+        {:else if !shown.length}
+          <p class="empty">{query.trim() ? "No matches." : secret ? "No secret notes yet. Press Ctrl+N." : "No notes yet. Press Ctrl+N or Super+Alt+N."}</p>
+        {:else}
+          <div class="grid" style:--cols={cols}>
+            {#each columns as col}
+              <div class="col">
+                {#each col as n (n.id)}
+                  {@const body = cardPreview(n)}
+                  <div class="note" data-id={n.id} role="button" tabindex="0" aria-label={cardHeading(n)}
+                    onclick={() => edit(n)} onkeydown={(e) => cardKeys(e, n)} oncontextmenu={(e) => contextMenu(e, n)}>
+                    <div class="t" dir="auto">{cardHeading(n)}</div>
+                    {#if n.images.length}
+                      <div class="img">
+                        <Thumb name={n.images[0]} />
+                        {#if n.images.length > 1}<span class="more">+{n.images.length - 1}</span>{/if}
                       </div>
                     {/if}
+                    <div class="b" dir="auto">{#if body}{@html render(body)}{:else}No text{/if}</div>
+                    <div class="meta">
+                      <span class="when">{formatWhen(n.updatedAt)}</span>
+                      {#if n.category.trim() && filter !== n.category}<span class="cat" dir="auto">{n.category}</span>{/if}
+                      {#if n.pinned}<span class="pin" aria-label="Pinned"><Icon name="pin" size={16} /></span>{/if}
+                    </div>
                   </div>
-                </div>
-              {/each}
-            </div>
-          {/each}
-        </div>
-      {/if}
-    </main>
+                {/each}
+              </div>
+            {/each}
+          </div>
+        {/if}
+      </main>
+    </div>
+
+    <button class="fab" onclick={create} title="New note (Ctrl+N)" aria-label="New note"><Icon name="add" size={24} /></button>
   {/if}
 
   {#if notice}
-    <div class="undo" role="status"><span>{notice.text}</span><button onclick={() => (notice = null)}>OK</button></div>
+    <div class="bar" role="status"><span>{notice.text}</span><button onclick={() => (notice = null)}>OK</button></div>
   {:else if undo}
-    <div class="undo" role="status">
-      <span>Note deleted</span>
-      <button onclick={restore}>Undo</button>
-    </div>
+    <div class="bar" role="status"><span>Note deleted</span><button onclick={restore}>Undo</button></div>
   {/if}
 </div>
 
@@ -259,109 +270,116 @@
 {/if}
 
 {#if gate}
-  <VaultGate setUp={vaultSetUp} onopen={() => { gate = false; secret = true; query = ""; filter = ""; }} onclose={() => (gate = false)} />
+  <VaultGate setUp={vaultSetUp} onopen={() => { gate = false; secret = true; query = ""; filter = null; }} onclose={() => (gate = false)} />
 {/if}
 
 <style>
-  :global(html.notes), :global(html.notes body) { margin: 0; height: 100%; background: var(--background); color: var(--text); }
-  :global(html.notes body) { font: 15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; -webkit-font-smoothing: antialiased; }
+  :global(html.notes), :global(html.notes body) { margin: 0; height: 100%; background: var(--background); color: var(--text); overflow: hidden; }
+  :global(html.notes body) { font-size: 15px; line-height: normal; }
   :global(html.notes #app) { height: 100%; }
-  .app { height: 100%; display: flex; flex-direction: column; overflow: hidden; }
+  .app { position: relative; height: 100%; display: flex; flex-direction: column; overflow: hidden; }
 
-  header { flex: none; display: flex; align-items: center; gap: 10px; padding: 14px 16px 8px; }
-  .search {
-    flex: 1; max-width: 640px; margin: 0 auto; display: flex; align-items: center; gap: 8px; height: 44px; padding: 0 14px;
-    border-radius: 22px; background: var(--surface); color: var(--secondary); border: 1px solid var(--hairline);
+  .column { flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 24px 20px 0; }
+  .titlerow { flex: none; display: flex; align-items: center; }
+  h1 { flex: 1; margin: 0; font-size: 34px; font-weight: 700; letter-spacing: -0.02em; line-height: 1.2; }
+  .iconbtn {
+    width: 40px; height: 40px; margin-inline-start: 4px; border: 0; border-radius: 20px; display: grid; place-items: center;
+    background: transparent; color: var(--secondary); cursor: pointer; transition: transform 150ms;
   }
-  .search:focus-within { border-color: var(--accent); }
-  .search input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--text); font: inherit; font-size: 15px; }
-  .search input::placeholder { color: var(--secondary); }
-  .clear { border: 0; background: transparent; color: var(--secondary); font-size: 20px; line-height: 1; cursor: pointer; padding: 0 2px; }
-  .new {
-    flex: none; display: flex; align-items: center; gap: 6px; height: 44px; padding: 0 18px 0 14px; border: 0; border-radius: 22px;
-    background: var(--accent); color: var(--on-accent); font: inherit; font-weight: 600; cursor: pointer;
-  }
-  .new:hover { filter: brightness(1.06); }
-  .new:active { transform: scale(0.97); }
+  .iconbtn.accent { color: var(--accent); }
+  .iconbtn:hover { background: color-mix(in srgb, var(--text) 7%, transparent); }
+  .iconbtn:active { transform: scale(0.85); }
 
-  .gear {
-    flex: none; width: 44px; height: 44px; border: 0; border-radius: 22px; display: grid; place-items: center;
-    background: transparent; color: var(--secondary); cursor: pointer;
-  }
-  .gear:hover { background: var(--wash); color: var(--text); }
+  .status { flex: none; display: flex; align-items: center; gap: 8px; padding: 6px 0 14px 2px; font-size: 14px; color: var(--secondary); }
+  .dot { width: 8px; height: 8px; border-radius: 4px; background: var(--success); }
   .syncline {
-    flex: none; align-self: center; margin: -2px 0 4px; padding: 2px 10px; border: 0; border-radius: 8px; background: transparent;
-    color: var(--secondary); font: inherit; font-size: 12.5px; cursor: pointer;
+    flex: none; align-self: flex-start; margin: 0; padding: 0 0 10px 2px; border: 0; background: transparent;
+    color: var(--secondary); font: inherit; font-size: 13px; cursor: pointer; text-align: start;
   }
   .syncline:hover { color: var(--text); }
-  .syncline.warn { color: var(--danger); font-weight: 600; }
-  .vaultbar { flex: none; display: flex; align-items: center; gap: 8px; padding: 12px 20px 0; color: var(--accent); }
-  .vaultbar strong { font-size: 17px; letter-spacing: -0.01em; }
-  .vaultbar .grow { flex: 1; }
-  .vaultbar button { border: 0; border-radius: 12px; padding: 7px 14px; background: var(--wash); color: var(--accent); font: inherit; font-weight: 600; cursor: pointer; }
-  .chips { flex: none; display: flex; gap: 6px; padding: 4px 16px 8px; overflow-x: auto; scrollbar-width: none; }
+  .syncline.warn { color: var(--accent); }
+
+  .search {
+    flex: none; display: flex; align-items: center; height: 42px; padding: 0 12px; border-radius: 12px;
+    background: var(--surface); color: var(--secondary); cursor: text;
+  }
+  .search input { flex: 1; min-width: 0; height: 100%; padding: 0 0 0 8px; border: 0; outline: 0; background: transparent; color: var(--text); font: inherit; font-size: 16px; }
+  .search input::placeholder { color: var(--secondary); }
+
+  .chips { flex: none; display: flex; gap: 8px; padding: 10px 0; overflow-x: auto; scrollbar-width: none; }
   .chip {
-    flex: none; border: 1px solid var(--hairline); border-radius: 999px; padding: 6px 14px; background: transparent; color: var(--secondary);
-    font: inherit; font-size: 13px; cursor: pointer; white-space: nowrap;
+    flex: none; height: 34px; padding: 0 14px; border: 0; border-radius: 17px; background: var(--surface); color: var(--text);
+    font: inherit; font-size: 14px; font-weight: 500; white-space: nowrap; cursor: pointer; transition: transform 150ms;
   }
-  .chip:hover { color: var(--text); }
-  .chip.on { background: var(--wash); color: var(--accent); border-color: transparent; font-weight: 600; }
+  .chip.on { background: var(--accent); color: var(--on-accent); }
+  .chip:active { transform: scale(0.95); }
 
-  main { flex: 1; min-height: 0; overflow-y: auto; padding: 6px 16px 96px; }
-  .grid { display: grid; grid-template-columns: repeat(var(--cols), minmax(0, 1fr)); gap: 12px; max-width: 1400px; margin: 0 auto; align-items: start; }
-  .col { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+  main { flex: 1; min-height: 0; overflow-y: auto; scrollbar-width: none; margin: 0 -20px; padding: 8px 20px 96px; }
+  main.nochips { padding-top: 18px; }
+  .grid { display: grid; grid-template-columns: repeat(var(--cols), minmax(0, 1fr)); gap: 10px; align-items: start; }
+  .col { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
   .note {
-    border-radius: 16px; background: var(--surface); border: 1px solid var(--hairline); cursor: pointer; overflow: hidden;
-    outline: none; transition: border-color 120ms, box-shadow 120ms;
+    padding: 16px 16px 14px; border-radius: 24px; background: var(--surface); cursor: pointer; outline: none;
+    transition: transform 160ms cubic-bezier(0.2, 0.9, 0.3, 1);
   }
-  .note:hover { border-color: color-mix(in srgb, var(--accent) 40%, var(--hairline)); }
-  .note:focus-visible { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent); }
-  .note:active { transform: scale(0.99); }
-  .inner { padding: 12px 14px; }
-  .t { font-weight: 650; font-size: 15.5px; letter-spacing: -0.01em; margin-bottom: 4px; overflow-wrap: anywhere; }
-  .b { color: var(--secondary); font-size: 13.5px; line-height: 1.5; overflow-wrap: anywhere; max-height: 15em; overflow: hidden; }
-  .meta { display: flex; align-items: center; gap: 6px; margin-top: 8px; }
-  .cat { font-size: 11.5px; color: var(--accent); background: var(--wash); border-radius: 999px; padding: 2px 9px; font-weight: 600; max-width: 70%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .pin { color: var(--accent); margin-left: auto; }
-
-  /* the preview's own markup (preview.ts) */
-  .b :global(.h) { color: var(--text); font-weight: 650; }
-  .b :global(.h1) { font-size: 1.15em; }
-  .b :global(.li) { display: flex; gap: 6px; padding-inline-start: calc(var(--lvl) * 14px); }
-  .b :global(.li.done) { text-decoration: line-through; opacity: 0.65; }
-  .b :global(.box) { flex: none; width: 11px; height: 11px; margin-top: 0.3em; border: 1.5px solid currentColor; border-radius: 3.5px; }
-  .b :global(.box.on) { background: var(--accent); border-color: var(--accent); }
-  .b :global(.num), .b :global(.dot) { flex: none; min-width: 0.9em; }
-  .b :global(.q) { border-inline-start: 2.5px solid var(--accent); padding-inline-start: 8px; font-style: italic; }
-  .b :global(.code), .b :global(code) { font-family: ui-monospace, "JetBrains Mono", monospace; font-size: 0.92em; }
-  .b :global(.code) { white-space: pre-wrap; background: var(--track); padding: 0 6px; }
-  .b :global(code) { background: var(--track); border-radius: 4px; padding: 0 3px; }
+  .note:active { transform: scale(0.97); }
+  .note:focus-visible { box-shadow: 0 0 0 2px var(--accent); }
+  .t {
+    font-size: 17px; font-weight: 700; color: var(--text); line-height: 1.3; overflow-wrap: anywhere;
+    display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; unicode-bidi: plaintext; text-align: start;
+  }
+  .img { position: relative; height: 120px; margin-top: 10px; border-radius: 12px; overflow: hidden; background: var(--hairline); }
+  .more { position: absolute; right: 8px; bottom: 8px; padding: 3px 8px; border-radius: 10px; background: rgb(0 0 0 / 0.6); color: #fff; font-size: 13px; }
+  .b {
+    padding-top: 10px; font-size: 15px; line-height: 1.3; color: var(--secondary); white-space: pre-wrap; overflow-wrap: anywhere;
+    display: -webkit-box; -webkit-line-clamp: 6; line-clamp: 6; -webkit-box-orient: vertical; overflow: hidden; unicode-bidi: plaintext; text-align: start;
+  }
+  .b :global(code) { font-family: ui-monospace, "JetBrains Mono", monospace; background: color-mix(in srgb, var(--secondary) 15%, transparent); }
   .b :global(.lnk) { color: var(--accent); }
-  .b :global(.tb) { border: 1px solid var(--hairline); border-radius: 8px; padding: 3px 7px; margin: 2px 0; }
-  .b :global(.th) { font-weight: 650; color: var(--text); }
-  .b :global(hr) { border: 0; border-top: 1px solid var(--hairline); margin: 6px 0; }
-
-  .empty { display: flex; flex-direction: column; align-items: center; gap: 12px; margin-top: 18vh; color: var(--secondary); }
-  .empty p { margin: 0; font-size: 16px; }
-
-  .undo {
-    position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%); z-index: 40; display: flex; align-items: center; gap: 14px;
-    padding: 8px 8px 8px 18px; border-radius: 16px; background: var(--text); color: var(--background);
-    box-shadow: 0 12px 32px rgb(0 0 0 / 0.25); animation: rise 200ms cubic-bezier(0.2, 0.9, 0.3, 1);
+  .b :global(.dim) { color: color-mix(in srgb, var(--secondary) 67%, transparent); }
+  .b :global(.done) { color: var(--secondary); }
+  .b :global(.box) {
+    display: inline-block; width: 0.95em; height: 0.95em; vertical-align: -0.12em; box-sizing: border-box;
+    border: 1.7px solid var(--secondary); border-radius: 0.285em;
   }
-  .undo button { border: 0; border-radius: 10px; padding: 7px 14px; background: transparent; color: var(--wash); font: inherit; font-weight: 700; cursor: pointer; }
-  .undo button:hover { background: color-mix(in srgb, var(--background) 14%, transparent); }
+  .b :global(.box.on) {
+    border: 0;
+    background: var(--accent) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Cpath d='M26 54 43 70 76 32' fill='none' stroke='white' stroke-width='14' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / 100% no-repeat;
+  }
+  .meta { display: flex; align-items: center; padding-top: 12px; }
+  .when { flex: 1; font-size: 13px; color: var(--secondary); }
+  .cat {
+    max-width: 90px; margin-inline-end: 8px; padding: 2px 8px; border-radius: 9px; font-size: 12px; color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 15%, transparent); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .pin { color: var(--accent); }
+  .empty { margin: 0; padding: 16px 0 0 4px; font-size: 15px; color: var(--secondary); }
+
+  .fab {
+    position: absolute; right: 20px; bottom: 24px; width: 56px; height: 56px; border: 0; border-radius: 28px; display: grid; place-items: center;
+    background: var(--accent); color: var(--on-accent); cursor: pointer; box-shadow: 0 6px 14px rgb(0 0 0 / 0.28);
+    transition: transform 160ms cubic-bezier(0.2, 0.9, 0.3, 1);
+  }
+  .fab:active { transform: scale(0.92); }
+
+  .bar {
+    position: absolute; left: 20px; right: 96px; bottom: 28px; z-index: 40; height: 48px; display: flex; align-items: center;
+    padding: 0 6px 0 18px; border-radius: 24px; background: var(--text); color: var(--background); font-size: 15px;
+    box-shadow: 0 8px 20px rgb(0 0 0 / 0.25); animation: rise 350ms cubic-bezier(0.2, 0.9, 0.3, 1);
+  }
+  .bar span { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .bar button { border: 0; padding: 12px 14px; background: transparent; color: var(--accent-inverse); font: inherit; font-weight: 500; cursor: pointer; }
 
   .menu {
-    position: fixed; z-index: 45; min-width: 180px; padding: 6px; border-radius: 14px; display: flex; flex-direction: column;
+    position: fixed; z-index: 45; min-width: 180px; padding: 6px; border-radius: 16px; display: flex; flex-direction: column;
     background: var(--floating); border: 1px solid var(--hairline); box-shadow: 0 14px 40px rgb(0 0 0 / 0.22);
     animation: pop 120ms cubic-bezier(0.2, 0.9, 0.3, 1); transform-origin: top left;
   }
-  .menu button { border: 0; border-radius: 9px; padding: 8px 12px; text-align: start; background: transparent; color: var(--text); font: inherit; cursor: pointer; }
-  .menu button:hover { background: var(--wash); }
+  .menu button { border: 0; border-radius: 10px; padding: 9px 12px; text-align: start; background: transparent; color: var(--text); font: inherit; font-size: 15px; cursor: pointer; }
+  .menu button:hover { background: color-mix(in srgb, var(--text) 7%, transparent); }
   .menu .danger { color: var(--danger); }
 
-  @keyframes rise { from { opacity: 0; transform: translate(-50%, 12px); } }
+  @keyframes rise { from { transform: translateY(90px); } }
   @keyframes pop { from { opacity: 0; transform: scale(0.96); } }
-  @media (prefers-reduced-motion: reduce) { .undo, .menu { animation: none; } .note { transition: none; } }
+  @media (prefers-reduced-motion: reduce) { .bar, .menu { animation: none; } .note, .fab, .chip { transition: none; } }
 </style>

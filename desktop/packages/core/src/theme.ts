@@ -4,6 +4,8 @@ export interface Colors {
   accent: string;
   /** Text and icons placed on top of `accent` (white or near-black, whichever reads better). */
   onAccent: string;
+  /** The accent as it would look in the opposite light/dark mode: for text on the inverse surface (undo bar). */
+  accentInverse: string;
   /** A see-through wash of the accent for chips and highlights. */
   accentContainer: string;
   background: string;
@@ -51,7 +53,7 @@ export function fixedColors(name: string, dark: boolean): Colors {
   const [aLight, aDark] = accentOf(name);
   const accent = dark ? aDark : aLight;
   return {
-    accent, onAccent: onColor(accent), accentContainer: accent + "2e",
+    accent, onAccent: onColor(accent), accentInverse: dark ? aLight : aDark, accentContainer: accent + "2e",
     background: dark ? "#0f1013" : "#f2f3f5",
     surface: dark ? "#1c1e22" : "#ffffff",
     floating: dark ? "#25272c" : "#ffffff",

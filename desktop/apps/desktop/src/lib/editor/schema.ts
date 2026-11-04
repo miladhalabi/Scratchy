@@ -347,6 +347,18 @@ export function setLines(editor: Editor, kind: "bullet" | "number" | "task" | "q
   editor.commands.focus();
 }
 
+/** Headings in the selection back to plain lines (the panel's "Normal"). */
+export function plainHeadings(editor: Editor) {
+  const { state, view } = editor;
+  const tr = state.tr;
+  state.doc.nodesBetween(state.selection.from, state.selection.to, (node, pos) => {
+    if (node.type.name === "heading") tr.setNodeMarkup(pos, state.schema.nodes.paragraph);
+    return node.type.name === "doc";
+  });
+  view.dispatch(tr);
+  editor.commands.focus();
+}
+
 export function indent(editor: Editor, by: 1 | -1) {
   editor.view.dispatch(setLevel(editor.state, by));
   editor.commands.focus();

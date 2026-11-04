@@ -2,8 +2,13 @@
   import { flushSync, onMount } from "svelte";
   import { invoke } from "@tauri-apps/api/core";
   import { listen } from "@tauri-apps/api/event";
-  import { canonical, fixedColors, pickCardNote, type Note } from "@scratchy/core";
+  import { canonical, fixedColors, newNote, pickCardNote, type Note } from "@scratchy/core";
   import RichEditor from "../lib/editor/RichEditor.svelte";
+  import { setLines } from "../lib/editor/schema";
+  import Icon from "../lib/Icon.svelte";
+  import { cardHeading } from "../lib/preview";
+  import { formatWhen } from "../main/when";
+  import "../lib/base.css";
   import { startEngine, store } from "../lib/engine";
   import { syncIfStale } from "../lib/sync";
   import { Genie, nearestEdge } from "./genie";
@@ -20,6 +25,10 @@
   /** The body as the phone would write it back: an untouched note keeps its exact original text. */
   let canon = "";
   let note: Note | null = null;
+  /** The card reopened on a note you already had: say so, and offer a fresh one (the "Continuing" row). */
+  let continuing: Note | null = $state(null);
+  /** The recent notes list, shown in place of the editor. */
+  let recents: Note[] | null = $state(null);
 
   let root: HTMLDivElement;
   let cardEl: HTMLDivElement;
@@ -31,8 +40,8 @@
   let springing = false;
 
   const dark = matchMedia("(prefers-color-scheme: dark)");
-  let colors = $state(fixedColors("teal", dark.matches));
-  dark.addEventListener("change", () => { colors = fixedColors("teal", dark.matches); });
+  let colors = $state(fixedColors("blue", dark.matches));
+  dark.addEventListener("change", () => { colors = fixedColors("blue", dark.matches); });
 
   // Until the surface has been shown once, the page doesn't know its real size yet: use the screen's.
   let sized = false;
@@ -87,6 +96,29 @@
     title = note.title;
     canon = canonical(note.body);
     editor.load(note.body);
+    continuing = p.create || (!note.title && !note.body) ? null : note;
+    recents = null;
+  }
+
+  /** Puts another note in the card (from the recent list, or a fresh one), saving the one that was there. */
+  function show(n: Note | null) {
+    save();
+    note = n ?? newNote(crypto.randomUUID());
+    title = note.title;
+    canon = canonical(note.body);
+    editor.load(note.body);
+    continuing = n;
+    recents = null;
+    if (n) { prefs.lastCardNote = n.id; prefs.lastCardAt = Date.now(); saveCard(prefs); }
+    editor.focus(true);
+  }
+  function toggleRecents() {
+    recents = recents ? null : store.all().filter((n) => !n.secret).sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 10);
+  }
+  function checklist() {
+    recents = null;
+    const ed = editor.instance();
+    if (ed) setLines(ed, "task");
   }
 
   /** A change from sync or the notes window: shown at once, unless there is typing here it would undo. */
@@ -129,7 +161,8 @@
   function stripsFor(sw = W(), sh = H()): Genie {
     const r = { x, y, w, h };
     const { edge, tx, ty } = nearestEdge(r, sw, sh);
-    const key = [title, editor.markdown(), Math.round(w), Math.round(h), colors.floating, colors.text, pinned, edge === "left" || edge === "right"].join("|");
+    const key = [title, editor.markdown(), Math.round(w), Math.round(h), colors.floating, colors.text, pinned, edge === "left" || edge === "right",
+      continuing?.id ?? "", continuing?.updatedAt ?? 0, recents ? "r" : ""].join("|");
     if (genie && genie.key === key) { genie.retarget(r, edge, tx, ty); return genie; }
     genie?.clear();
     genie = new Genie(root, r, edge, tx, ty);
@@ -354,21 +387,36 @@
   <div class="card" bind:this={cardEl}>
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div class="head" onpointerdown={dragStart} onpointermove={dragMove} onpointerup={dragEnd} onpointercancel={dragEnd}>
-      <span class="grip" aria-hidden="true"></span>
-      <button class="icon" class:on={pinned} title={pinned ? "Unpin" : "Pin: keep it on screen"} onclick={togglePin} aria-pressed={pinned}>
-        <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
-          <path d="M14.5 3.5 20.5 9.5 17 11l-3.5 3.5.5 4-1.5 1.5-3.5-3.5L5 20.5 3.5 19 7.5 15 4 11.5 5.5 10l4 .5L13 7z"
-            fill={pinned ? "currentColor" : "none"} stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" />
-        </svg>
-      </button>
-      <button class="icon" title="Close (Esc)" onclick={close} aria-label="Close">
-        <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
-          <path d="M6 6l12 12M18 6 6 18" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
-        </svg>
-      </button>
+      <button class="icon" class:on={!!recents} title="Recent notes" aria-label="Recent notes" onclick={toggleRecents}><Icon name="list" size={18} /></button>
+      <button class="icon" title="Checklist" aria-label="Checklist" onclick={checklist}><Icon name="checklist" size={18} /></button>
+      <span class="handle" aria-hidden="true"><i></i></span>
+      <button class="icon" class:pinned title={pinned ? "Unpin" : "Pin card: keep it on screen and use the computer normally"} onclick={togglePin} aria-pressed={pinned}><Icon name="pin" size={18} /></button>
     </div>
-    <input class="title" placeholder="Title" bind:value={title} oninput={typed} dir="auto" spellcheck="false" />
-    <RichEditor bind:this={editor} class="body" placeholder="Write it down…" onchange={typed} />
+    {#if continuing}
+      <div class="continue">
+        <span>Continuing · edited {formatWhen(continuing.updatedAt)}</span>
+        <button onclick={() => show(null)}>＋ New note</button>
+      </div>
+    {/if}
+    <div class="content">
+      <div class="ed" class:gone={!!recents}>
+        <input class="title" placeholder="Title" bind:value={title} oninput={typed} dir="auto" spellcheck="false"
+          onkeydown={(e) => { if (e.key === "Enter") { e.preventDefault(); editor.focus(); } }} />
+        <div class="rule"></div>
+        <RichEditor bind:this={editor} class="body" placeholder="Start typing…" onchange={typed} />
+      </div>
+      {#if recents}
+        <div class="recents scroll">
+          <button class="new" onclick={() => show(null)}>＋  New note</button>
+          {#each recents as n (n.id)}
+            <button onclick={() => show(n)} dir="auto">{n.pinned ? "📌 " : ""}{cardHeading(n)}</button>
+          {/each}
+        </div>
+      {/if}
+    </div>
+    <div class="rule full"></div>
+    <button class="closestrip" onclick={close}><Icon name="close" size={16} /><span>Close</span></button>
+    <span class="grip" aria-hidden="true"><Icon name="grip" size={20} /></span>
     {#each ["n", "s", "e", "w", "ne", "nw", "se", "sw"] as d}
       <!-- svelte-ignore a11y_no_static_element_interactions -->
       <div class="rz {d}" data-dir={d} onpointerdown={resizeStart} onpointermove={resizeMove} onpointerup={resizeEnd} onpointercancel={resizeEnd}></div>
@@ -380,47 +428,61 @@
   :global(html), :global(body) {
     margin: 0; height: 100%; overflow: hidden;
     background: transparent;
-    font: 15px/1.5 system-ui, sans-serif;
-    -webkit-font-smoothing: antialiased;
+    font-size: 15px;
   }
   .root { position: fixed; inset: 0; }
+  /* The phone's floating card (OverlayService + Appearance.card): opaque, 20px corners, a hairline edge, a soft shadow. */
   .card {
     position: absolute; left: 0; top: 0;
-    display: flex; flex-direction: column;
+    display: flex; flex-direction: column; padding-top: 6px;
     background: var(--floating); color: var(--text);
-    border-radius: 22px;
+    border-radius: 20px;
     border: 1px solid var(--hairline);
-    box-shadow: 0 18px 50px rgb(0 0 0 / 0.28), 0 2px 8px rgb(0 0 0 / 0.16);
+    box-shadow: 0 10px 28px rgb(0 0 0 / 0.3), 0 2px 6px rgb(0 0 0 / 0.16);
     visibility: hidden;
     will-change: transform;
     box-sizing: border-box;
     overflow: hidden;
   }
-  .head {
-    flex: none; height: 44px; display: flex; align-items: center; gap: 2px;
-    padding: 0 8px 0 16px; cursor: grab; touch-action: none; user-select: none;
-  }
+  .head { flex: none; height: 40px; margin: 0 10px; display: flex; align-items: center; cursor: grab; touch-action: none; user-select: none; }
   .head:active { cursor: grabbing; }
-  .grip {
-    flex: 1; height: 100%;
-    background: radial-gradient(circle, var(--secondary) 1.2px, transparent 1.6px) left center / 8px 8px repeat-x;
-    opacity: 0.35; mask: linear-gradient(90deg, #000 0 40px, transparent 40px);
-  }
+  .handle { flex: 1; height: 100%; display: grid; place-items: center; }
+  .handle i { width: 36px; height: 4px; border-radius: 2px; background: var(--hairline); }
   .icon {
-    width: 36px; height: 36px; border: 0; border-radius: 12px; display: grid; place-items: center;
-    background: transparent; color: var(--secondary); cursor: pointer;
+    width: 36px; height: 40px; border: 0; border-radius: 12px; display: grid; place-items: center;
+    background: transparent; color: var(--secondary); cursor: pointer; transition: transform 150ms;
   }
-  .icon:hover { background: var(--wash); color: var(--text); }
-  .icon:active { transform: scale(0.94); }
-  .icon.on { color: var(--accent); }
+  .icon:hover, .icon.on { color: var(--text); }
+  .icon:active { transform: scale(0.85); }
+  .icon.pinned { color: var(--accent); }
+  .continue { flex: none; display: flex; align-items: center; margin: 0 10px 0 14px; }
+  .continue span { flex: 1; min-width: 0; font-size: 12px; color: var(--secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .continue button { border: 0; background: transparent; padding: 8px 2px 8px 10px; color: var(--accent); font: inherit; font-size: 13px; font-weight: 500; cursor: pointer; }
+  .content { flex: 1; min-height: 0; position: relative; margin: 0 10px; display: flex; flex-direction: column; }
+  .ed { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+  .ed.gone { visibility: hidden; }
   .title {
-    border: 0; outline: 0; background: transparent; color: var(--text); font: inherit;
-    padding: 0 20px; box-sizing: border-box; width: 100%;
+    flex: none; border: 0; outline: 0; background: transparent; color: var(--text); font: inherit; width: 100%; box-sizing: border-box;
+    font-size: 18px; font-weight: 700; padding: 8px 4px 4px; unicode-bidi: plaintext; text-align: start;
   }
-  .title { flex: none; font-size: 19px; font-weight: 650; letter-spacing: -0.01em; padding-top: 2px; padding-bottom: 6px; }
-  .card :global(.body) { flex: 1; }
-  .card :global(.body .rich) { padding: 0 20px 18px; }
-  .title::placeholder { color: var(--secondary); opacity: 0.7; }
+  .title::placeholder { color: var(--secondary); }
+  .rule { flex: none; height: 1px; margin: 0 4px; background: var(--hairline); }
+  .rule.full { margin: 0; }
+  .card :global(.body) { flex: 1; min-height: 0; }
+  .card :global(.body .rich) { padding: 8px 4px; font-size: 15px; }
+  .recents { position: absolute; inset: 0; overflow-y: auto; display: flex; flex-direction: column; scrollbar-width: none; }
+  .recents button {
+    flex: none; border: 0; background: transparent; padding: 11px 6px; color: var(--text); font: inherit; font-size: 15px; text-align: start;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; unicode-bidi: plaintext; border-radius: 10px;
+  }
+  .recents button:hover { background: color-mix(in srgb, var(--text) 6%, transparent); }
+  .recents .new { color: var(--accent); }
+  .closestrip {
+    flex: none; height: 46px; border: 0; background: transparent; display: flex; align-items: center; justify-content: center; gap: 8px;
+    color: var(--secondary); font: inherit; font-size: 14px; cursor: pointer;
+  }
+  .closestrip:hover { color: var(--text); }
+  .grip { position: absolute; right: 4px; bottom: 4px; padding: 6px; color: var(--secondary); pointer-events: none; }
   .rz { position: absolute; z-index: 2; touch-action: none; }
   .n, .s { left: 14px; right: 14px; height: 6px; cursor: ns-resize; }
   .n { top: 0; } .s { bottom: 0; }

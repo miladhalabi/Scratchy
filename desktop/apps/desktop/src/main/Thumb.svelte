@@ -21,5 +21,5 @@
 {#if src}<img {src} alt="" draggable="false" />{/if}
 
 <style>
-  img { display: block; width: 100%; max-height: 220px; object-fit: cover; border-radius: 14px 14px 0 0; }
+  img { display: block; width: 100%; height: 100%; object-fit: cover; }
 </style>

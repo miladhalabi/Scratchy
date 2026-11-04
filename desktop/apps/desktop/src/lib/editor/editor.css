@@ -1,49 +1,52 @@
-/* The rich editor: formatting drawn, markdown symbols hidden (like RichText.kt's spans). */
-.rich { white-space: pre-wrap; overflow-wrap: break-word; caret-color: var(--accent); line-height: 1.55; }
-.rich > * { margin: 0; min-height: 1.55em; }
+/* The rich editor, drawn like RichText.kt's spans: formatting shown, markdown symbols hidden. */
+.rich { white-space: pre-wrap; overflow-wrap: break-word; caret-color: var(--accent); line-height: 1.4; }
+.rich > * { margin: 0; min-height: 1.4em; }
 .rich p, .rich .quote, .rich .li, .rich h1, .rich h2, .rich h3, .rich h4, .rich h5, .rich h6 { unicode-bidi: plaintext; }
-.rich h1, .rich h2, .rich h3, .rich h4, .rich h5, .rich h6 { font-weight: 700; letter-spacing: -0.01em; line-height: 1.3; }
-.rich h1 { font-size: 1.4em; } .rich h2 { font-size: 1.25em; } .rich h3 { font-size: 1.12em; } .rich h4 { font-size: 1.05em; }
-.rich h5, .rich h6 { font-size: 1em; }
+.rich h1, .rich h2, .rich h3, .rich h4, .rich h5, .rich h6 { font-weight: 700; line-height: 1.3; }
+.rich h1 { font-size: 1.55em; } .rich h2 { font-size: 1.35em; } .rich h3 { font-size: 1.2em; }
+.rich h4 { font-size: 1.1em; } .rich h5 { font-size: 1.05em; } .rich h6 { font-size: 1em; }
 
+/* List lines: the marker sits in the start margin, indent 22px per level, then 26px (30px for numbers). */
 .rich .li { position: relative; padding-inline-start: calc(var(--indent) + var(--marker)); }
-.rich .li::before {
-  position: absolute; inset-inline-start: var(--indent); top: 0; width: var(--marker);
-  color: var(--secondary); font-variant-numeric: tabular-nums;
+.rich .li::before { position: absolute; inset-inline-start: var(--indent); color: var(--secondary); }
+.rich .li[data-kind="bullet"]::before {
+  content: ""; top: calc(0.7em - 0.12em); margin-inline-start: calc(var(--marker) * 0.4 - 0.12em);
+  width: 0.24em; height: 0.24em; border-radius: 50%; background: var(--secondary);
 }
-.rich .li[data-kind="bullet"]::before { content: "•"; text-align: center; width: calc(var(--marker) - 8px); color: var(--accent); }
-.rich .li[data-kind="number"]::before { content: attr(data-n); color: var(--secondary); }
+.rich .li[data-kind="number"]::before { content: attr(data-n); width: calc(var(--marker) * 0.8); text-align: end; }
 .rich .li[data-kind="task"]::before {
-  content: ""; top: 0.32em; width: 16px; height: 16px; box-sizing: border-box; border-radius: 5px;
-  border: 1.8px solid var(--secondary); cursor: pointer;
+  content: ""; top: calc(0.7em - 0.475em); margin-inline-start: 0.04em; width: 0.95em; height: 0.95em;
+  box-sizing: border-box; border-radius: 0.285em; border: 1.7px solid var(--secondary); cursor: pointer;
 }
 .rich .li[data-kind="task"][data-checked="true"]::before {
-  border-color: var(--accent);
-  background: var(--accent) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3.5 8.2 6.6 11.2 12.5 4.8' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / 100% no-repeat;
+  border: 0;
+  background: var(--accent) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Cpath d='M26 54 43 70 76 32' fill='none' stroke='white' stroke-width='14' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / 100% no-repeat;
 }
-.rich .li[data-kind="task"][data-checked="true"] { color: var(--secondary); text-decoration: line-through; text-decoration-color: color-mix(in srgb, var(--secondary) 70%, transparent); }
+.rich .li[data-kind="task"][data-checked="true"] { color: var(--secondary); text-decoration: line-through; }
 
-.rich .quote { border-inline-start: 3px solid color-mix(in srgb, var(--secondary) 55%, transparent); padding-inline-start: 13px; color: var(--secondary); font-style: italic; }
-.rich .raw { font-family: ui-monospace, "JetBrains Mono", monospace; font-size: 0.9em; color: var(--secondary); }
+.rich .quote { position: relative; padding-inline-start: 16px; color: var(--secondary); font-style: italic; }
+.rich .quote::before { content: ""; position: absolute; inset-inline-start: 2px; top: 0; bottom: 0; width: 3px; border-radius: 1.5px; background: var(--secondary); }
+.rich .raw { font-family: ui-monospace, "JetBrains Mono", monospace; color: color-mix(in srgb, var(--secondary) 67%, transparent); }
 .rich pre {
-  font-family: ui-monospace, "JetBrains Mono", monospace; font-size: 0.88em; line-height: 1.5;
-  background: color-mix(in srgb, var(--secondary) 14%, transparent); border-radius: 10px; padding: 8px 12px; margin: 2px 0;
+  font-family: ui-monospace, "JetBrains Mono", monospace; line-height: 1.4;
+  background: color-mix(in srgb, var(--secondary) 15%, transparent); margin: 0; padding: 0;
 }
-.rich code { font-family: ui-monospace, "JetBrains Mono", monospace; font-size: 0.9em; background: color-mix(in srgb, var(--secondary) 16%, transparent); border-radius: 5px; padding: 0 3px; }
+.rich code { font-family: ui-monospace, "JetBrains Mono", monospace; background: color-mix(in srgb, var(--secondary) 15%, transparent); }
 .rich pre code { background: none; padding: 0; font-size: inherit; }
-.rich a { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
-.rich s { color: var(--secondary); }
+.rich a { color: var(--accent); text-decoration: underline; }
 
 .rich .tbl { margin: 4px 0; overflow-x: auto; cursor: pointer; border-radius: 10px; }
 .rich .tbl table {
   border-collapse: separate; border-spacing: 0; min-width: 100%;
-  border: 1.2px solid color-mix(in srgb, var(--secondary) 40%, transparent); border-radius: 10px; overflow: hidden;
-  font-size: 0.92em; line-height: 1.4;
+  border: 1.2px solid color-mix(in srgb, var(--secondary) 40%, transparent); border-radius: 10px; overflow: hidden; line-height: 1.35;
 }
-.rich .tbl th, .rich .tbl td { padding: 7px 9px; text-align: start; vertical-align: top; border-inline-end: 1px solid color-mix(in srgb, var(--secondary) 40%, transparent); border-bottom: 1px solid color-mix(in srgb, var(--secondary) 40%, transparent); white-space: pre-wrap; }
-.rich .tbl th { background: color-mix(in srgb, var(--accent) 15%, transparent); font-weight: 650; }
+.rich .tbl th, .rich .tbl td {
+  padding: 8px; text-align: start; vertical-align: top; white-space: pre-wrap; min-width: 56px;
+  border-inline-end: 1px solid color-mix(in srgb, var(--secondary) 40%, transparent); border-bottom: 1px solid color-mix(in srgb, var(--secondary) 40%, transparent);
+}
+.rich .tbl th { background: color-mix(in srgb, var(--accent) 15%, transparent); font-weight: 700; }
 .rich .tbl tr > :last-child { border-inline-end: 0; }
 .rich .tbl tr:last-child > * { border-bottom: 0; }
 .rich .tbl.ProseMirror-selectednode table { outline: 2px solid var(--accent); outline-offset: 1px; }
 
-.rich .empty::before { content: attr(data-placeholder); color: var(--secondary); opacity: 0.7; position: absolute; pointer-events: none; }
+.rich .empty::before { content: attr(data-placeholder); color: var(--secondary); position: absolute; pointer-events: none; }

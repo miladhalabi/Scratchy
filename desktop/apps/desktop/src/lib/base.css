@@ -1,0 +1,7 @@
+/* Shared by both windows. The phone's text is Roboto (Noto for other scripts, Arabic included); the same here
+   when installed, otherwise Noto Sans, which most Linux desktops have. */
+:root {
+  --font: Roboto, "Noto Sans", "Noto Sans Arabic", "Segoe UI", system-ui, sans-serif;
+}
+html, body { font-family: var(--font); -webkit-font-smoothing: antialiased; }
+input, button, textarea { font-family: inherit; }

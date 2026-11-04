@@ -1,5 +1,8 @@
-/** A note's body drawn for reading (grid cards): formatting shown, symbols hidden, like Markdown.render on the phone. */
-import { type Line, type Run, numberOf, parse, tableRows, parseInline } from "@scratchy/core";
+/**
+ * A note as the phone's grid shows it (Note.heading, Note.preview, Markdown.render): the heading on top, then the
+ * rest as one flowing text with the formatting drawn and the markdown symbols hidden.
+ */
+import { type Line, type Note, type Run, noteHeading, numberOf, parse, parseInline, tableRows } from "@scratchy/core";
 
 const escapeHtml = (s: string) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
 
@@ -10,38 +13,47 @@ function runs(rs: Run[]): string {
     if (r.italic) h = `<em>${h}</em>`;
     if (r.bold) h = `<strong>${h}</strong>`;
     if (r.strike) h = `<s>${h}</s>`;
-    if (r.link != null) h = `<span class="lnk">${h}</span>`;
+    if (r.link != null) h = `<u class="lnk">${h}</u>`;
     return h;
   }).join("");
 }
 
+const SIZES = [1.4, 1.25, 1.12, 1.05, 1, 1];
+
 function line(l: Line, all: Line[], i: number): string {
   switch (l.type) {
-    case "heading": return `<div class="h h${Math.min(l.level, 3)}" dir="auto">${runs(l.runs)}</div>`;
+    case "heading": return `<strong style="font-size:${SIZES[l.level - 1]}em">${runs(l.runs)}</strong>`;
     case "item": {
-      const mark = l.kind === "task" ? `<span class="box${l.checked ? " on" : ""}"></span>`
-        : l.kind === "bullet" ? `<span class="dot">•</span>` : `<span class="num">${numberOf(all, i)}.</span>`;
-      return `<div class="li${l.checked ? " done" : ""}" dir="auto" style="--lvl:${l.level}">${mark}<span>${runs(l.runs)}</span></div>`;
+      const pad = "  ".repeat(l.level);
+      if (l.kind === "task") return `${pad}<span class="box${l.checked ? " on" : ""}"></span> ${l.checked ? `<s class="done">${runs(l.runs)}</s>` : runs(l.runs)}`;
+      return `${pad}${l.kind === "bullet" ? "•" : `${numberOf(all, i)}.`} ${runs(l.runs)}`;
     }
-    case "quote": return `<div class="q" dir="auto">${runs(l.runs)}</div>`;
-    case "code": return `<div class="code">${escapeHtml(l.text) || "&nbsp;"}</div>`;
-    case "raw": return /^\s*([-*_])(\s*\1){2,}\s*$/.test(l.text) ? `<hr>` : `<div class="code">${escapeHtml(l.text)}</div>`;
+    case "quote": return `<span class="dim">│ </span><em>${runs(l.runs)}</em>`;
+    case "code": return `<code>${escapeHtml(l.text)}</code>`;
+    case "raw": return /^\s*([-*_])(\s*\1){2,}\s*$/.test(l.text) ? `<span class="dim">────────────</span>` : escapeHtml(l.text);
     case "table": {
-      const rows = tableRows(l.rows);
-      return `<div class="tb">${rows.map((r, ri) => `<div class="${ri === 0 ? "th" : "tr"}" dir="auto">${r.filter((c) => c.trim()).map((c) => runs(parseInline(c))).join("  ·  ")}</div>`).join("")}</div>`;
+      return tableRows(l.rows)
+        .map((r) => r.filter((c) => c.trim()))
+        .filter((r) => r.length)                                       // empty rows aren't worth a line
+        .map((r, ri) => { const t = r.map((c) => runs(parseInline(c))).join("  ·  "); return ri === 0 ? `<strong>${t}</strong>` : t; })
+        .join("\n");
     }
-    default: return `<div dir="auto">${runs(l.runs) || "&nbsp;"}</div>`;
+    default: return runs(l.runs);
   }
 }
 
-/** HTML for the first `max` lines worth showing (blank lines at the start and end left out). */
-export function preview(md: string, max = 10): string {
-  const all = parse(md);
-  let a = 0, b = all.length;
-  const blank = (l: Line) => l.type === "p" && l.runs.every((r) => !r.text.trim());
-  while (a < b && blank(all[a])) a++;
-  while (b > a && blank(all[b - 1])) b--;
-  const out: string[] = [];
-  for (let i = a; i < b && out.length < max; i++) out.push(line(all[i], all, i));
-  return out.join("");
+/** Markdown rendered for reading, at most `maxChars` of it (the phone takes 1500). */
+export function render(md: string, maxChars = 1500): string {
+  const all = parse(md.slice(0, maxChars));
+  return all.map((l, i) => line(l, all, i)).join("\n");
 }
+
+/** The text under the heading: the whole body, or without its first line when that line is the heading. */
+export function cardPreview(n: Note): string {
+  if (n.title.trim()) return n.body.trim();
+  const lines = n.body.split("\n");
+  const first = lines.findIndex((l) => l.trim());
+  return first < 0 ? "" : lines.slice(first + 1).join("\n").trim();
+}
+
+export const cardHeading = (n: Note) => noteHeading(n) || "Untitled";
