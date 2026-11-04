@@ -9,15 +9,13 @@
 //!
 //! On Linux/Wayland it is a layer-shell surface on the overlay layer, the only kind drawn above fullscreen apps.
 
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 
 /// Whether the card's window is mapped right now (the page decides when to hide it, after its closing animation).
 static SHOWN: AtomicBool = AtomicBool::new(false);
 /// `scratchy --toggle` started the app: open the card as soon as the page is ready.
 pub static OPEN_ON_BOOT: AtomicBool = AtomicBool::new(false);
-/// When the keybinding started `scratchy --toggle` (epoch, tenths of ms), for the timing logs.
-pub static KEY_AT: AtomicU64 = AtomicU64::new(0);
 
 fn builder<'a>(app: &'a AppHandle) -> WebviewWindowBuilder<'a, tauri::Wry, AppHandle> {
     WebviewWindowBuilder::new(app, "card", WebviewUrl::App("index.html?w=card".into()))

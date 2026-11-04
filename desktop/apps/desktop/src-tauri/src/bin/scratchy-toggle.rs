@@ -5,9 +5,8 @@
 fn main() {
     use std::io::Write;
     let dir = std::env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| "/tmp".into());
-    let started = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs_f64() * 1000.0).unwrap_or(0.0);
     if let Ok(mut s) = std::os::unix::net::UnixStream::connect(std::path::Path::new(&dir).join("scratchy.sock")) {
-        if s.write_all(format!("toggle {started:.1}\n").as_bytes()).is_ok() { return; }
+        if s.write_all(b"toggle\n").is_ok() { return; }
     }
     // Not running: start it next to this program (`scratchy` when installed, the dev build otherwise).
     let here = std::env::current_exe().ok().and_then(|p| p.parent().map(|d| d.to_path_buf())).unwrap_or_default();

@@ -219,12 +219,6 @@ fn card_keyboard(app: AppHandle, exclusive: bool) { overlay::keyboard(&app, excl
 fn card_boot(app: AppHandle) {
     if overlay::OPEN_ON_BOOT.swap(false, std::sync::atomic::Ordering::SeqCst) { overlay::toggle(&app) }
 }
-/// Timing lines from the page, printed with the app's own (for measuring the card; removed afterwards).
-/// Epoch ms when the keybinding started `scratchy --toggle` last (0 = not from the key).
-#[tauri::command]
-fn card_key_at() -> f64 { overlay::KEY_AT.swap(0, std::sync::atomic::Ordering::SeqCst) as f64 / 10.0 }
-#[tauri::command]
-fn perf(line: String) { eprintln!("[perf] {line}"); }
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
@@ -246,7 +240,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             read_text, write_text, remove_text, read_attachment, write_attachment, has_attachment, data_path,
             google_client, oauth_start, oauth_wait, open_url, secret_get, secret_set, secret_delete,
-            card_hide, card_input, card_keyboard, card_boot, card_key_at, perf
+            card_hide, card_input, card_keyboard, card_boot
         ])
         .setup(|app| {
             let h = app.handle().clone();

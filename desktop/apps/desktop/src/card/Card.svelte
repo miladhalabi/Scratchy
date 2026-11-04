@@ -35,7 +35,6 @@
   // Until the surface has been shown once, the page doesn't know its real size yet: use the screen's.
   let sized = false;
   const W = () => (sized ? window.innerWidth : screen.width), H = () => (sized ? window.innerHeight : screen.height);
-  const perf = (line: string) => { invoke("perf", { line }).catch(() => {}); };
 
   function place() {
     cardEl.style.transform = `translate3d(${x}px,${y}px,0)`;
@@ -106,16 +105,6 @@
   }
 
   const speed = () => 100 / clamp(prefs.speed, 50, 200);
-  let frames: number[] = [];
-  const countFrame = () => frames.push(performance.now());
-  function frameReport(what: string) {
-    if (frames.length < 2) return;
-    let worst = 0;
-    for (let i = 1; i < frames.length; i++) worst = Math.max(worst, frames[i] - frames[i - 1]);
-    const fps = ((frames.length - 1) * 1000) / (frames[frames.length - 1] - frames[0]);
-    perf(`${what}: ${frames.length} frames, ${fps.toFixed(0)} fps, longest frame ${worst.toFixed(1)} ms`);
-    frames = [];
-  }
 
   /** The strips for the card as it looks now, reusing the kept ones when nothing about it changed. */
   function stripsFor(sw = W(), sh = H()): Genie {
@@ -124,11 +113,9 @@
     const key = [title, body, Math.round(w), Math.round(h), colors.floating, colors.text, pinned, edge === "left" || edge === "right"].join("|");
     if (genie && genie.key === key) { genie.retarget(r, edge, tx, ty); return genie; }
     genie?.clear();
-    const t0 = performance.now();
     genie = new Genie(root, r, edge, tx, ty);
     genie.build(cardEl);
     genie.key = key;
-    perf(`genie strips built in ${(performance.now() - t0).toFixed(1)} ms`);
     return genie;
   }
 
@@ -137,7 +124,7 @@
     return [edge === "left" ? -60 : edge === "right" ? 60 : 0, edge === "top" ? -60 : edge === "bottom" ? 60 : 0];
   };
 
-  function open(keyAt: Promise<number>, eventAt: number) {
+  function open() {
     const reverse = phase === "closing";
     const fromT = reverse && anim ? anim.t() : 1;
     anim?.cancel();
@@ -150,9 +137,6 @@
     /** On the first frame the surface has its real size: a different screen means placing the card again. */
     const firstFrame = () => {
       sized = true;
-      const t = performance.now();
-      keyAt.then((k) => perf(`open: event to first frame ${(t - eventAt).toFixed(0)} ms` +
-        (k ? ` (key to first frame ${(performance.timeOrigin + t - k).toFixed(0)} ms)` : "")));
       if (`${W()}x${H()}` === size) return false;
       fit(); place();
       return true;
@@ -162,12 +146,11 @@
       if (!reverse || !genie) stripsFor();
       genie!.frame(fromT);
       genie!.show();
-      frames = [];
       let first = true;
       anim = runT(fromT, 0, 420 * speed() * fromT, decelerate(1.3), (t) => {
         if (first) { first = false; if (firstFrame()) stripsFor().show(); }
-        genie!.frame(t); countFrame();
-      }, () => { frameReport("genie open"); shown(); });
+        genie!.frame(t);
+      }, shown);
     } else if (prefs.anim === "slide") {
       cardEl.style.visibility = "visible";
       let first = true;
@@ -207,9 +190,7 @@
       genie!.frame(fromT);
       genie!.show();
       cardEl.style.visibility = "hidden";
-      frames = [];
-      anim = runT(fromT, 1, 480 * speed() * (1 - fromT), accelDecel, (t) => { genie!.frame(t); countFrame(); },
-        () => { frameReport("genie close"); hidden(); });
+      anim = runT(fromT, 1, 480 * speed() * (1 - fromT), accelDecel, (t) => genie!.frame(t), hidden);
     } else if (prefs.anim === "slide") {
       anim = runT(fromT, 1, 200 * speed() * (1 - fromT), (p) => p * p, (t) => {
         const [dx, dy] = edgeShift();
@@ -229,8 +210,8 @@
     invoke("card_hide").catch(() => {});
   }
 
-  function toggle(keyAt: Promise<number>, eventAt: number) {
-    if (phase === "open" || phase === "opening") close(); else open(keyAt, eventAt);
+  function toggle() {
+    if (phase === "open" || phase === "opening") close(); else open();
   }
 
   // ---- drag (by the header) ----
@@ -243,7 +224,6 @@
     springing = false;                                   // grab it mid-flight, from where it is drawn now
     drag = { id: e.pointerId, ox: e.clientX - x, oy: e.clientY - y, track: new Tracker() };
     drag.track.add(e.clientX, e.clientY);
-    frames = [];
     e.preventDefault();
   }
   function dragMove(e: PointerEvent) {
@@ -252,13 +232,11 @@
     y = e.clientY - drag.oy;
     drag.track.add(e.clientX, e.clientY);
     cardEl.style.transform = `translate3d(${x}px,${y}px,0)`;
-    countFrame();
   }
   function dragEnd(e: PointerEvent) {
     if (!drag || e.pointerId !== drag.id) return;
     const { vx, vy } = drag.track.velocity();
     drag = null;
-    frameReport("drag");
     // A flick throws the card: land where it would coast to, kept on the screen.
     const tx = clamp(x + project(vx), MARGIN, W() - w - MARGIN);
     const ty = clamp(y + project(vy), MARGIN, H() - h - MARGIN);
@@ -290,7 +268,6 @@
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
     springing = false;
     rs = { id: e.pointerId, dir, px: e.clientX, py: e.clientY, x, y, w, h };
-    frames = [];
     e.preventDefault();
     e.stopPropagation();
   }
@@ -302,12 +279,10 @@
     if (rs.dir.includes("w")) { w = clamp(rs.w - dx, MIN_W, rs.x + rs.w - MARGIN); x = rs.x + rs.w - w; }
     if (rs.dir.includes("n")) { h = clamp(rs.h - dy, MIN_H, rs.y + rs.h - MARGIN); y = rs.y + rs.h - h; }
     place();
-    countFrame();
   }
   function resizeEnd(e: PointerEvent) {
     if (!rs || e.pointerId !== rs.id) return;
     rs = null;
-    frameReport("resize");
     remember();
     syncInput();
   }
@@ -342,9 +317,7 @@
       // Ready before the first open: the note it would open on, already cut into genie strips.
       pick(); flushSync(); fit(); place();
       if (prefs.anim === "genie") stripsFor().hide();
-      off = await listen("card-toggle", () => {
-        toggle(invoke<number>("card_key_at").catch(() => 0), performance.now());
-      });
+      off = await listen("card-toggle", toggle);
       invoke("card_boot").catch(() => {});
     })();
     window.addEventListener("keydown", keys);
