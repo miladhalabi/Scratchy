@@ -25,23 +25,50 @@ export class LocalStore implements Store {
   onEdit(fn: (id: string) => void) { this.editListeners.add(fn); return () => this.editListeners.delete(fn); }
   private edited(id: string) { this.editListeners.forEach((f) => f(id)); }
 
-  async load() {
-    const n = await files.readText("notes.json");
-    if (n) for (const o of JSON.parse(n)) {
-      const note = noteFromJson(o);
-      if (o.secret && o.enc && this.dataKey) {            // secret text is stored sealed
-        const t = await openSecret(this.dataKey, o.enc);
-        note.title = t?.title ?? ""; note.body = t ? t.body : "(unreadable)";
-      }
-      this.map.set(note.id, note);
+  /**
+   * Secret notes whose text can't be opened (no key yet, or the key was lost). They are kept exactly as they are
+   * on disk, never shown or edited, and left out of sync, so the copy in Drive comes back in their place.
+   */
+  private locked = new Map<string, Record<string, unknown>>();
+
+  /** A note as written to disk: a secret note's title and text are sealed with the data key. */
+  private async toDisk(n: Note): Promise<Record<string, unknown>> {
+    const o = noteToJson(n);
+    if (n.secret) {
+      if (!this.dataKey) throw new Error("no key for secret notes");      // never write their text in the clear
+      o.enc = await sealSecret(this.dataKey, { title: n.title, body: n.body });
+      o.title = ""; o.body = "";
     }
-    const d = await files.readText("deleted.json");
-    if (d) this.tombs = JSON.parse(d);
+    return o;
+  }
+  /** The note, or null for a secret note that can't be read. */
+  private async fromDisk(o: any): Promise<Note | null> {
+    const note = noteFromJson(o);
+    if (!note.secret) return note;
+    const t = o.enc && this.dataKey ? await openSecret(this.dataKey, o.enc) : null;
+    if (t) { note.title = t.title; note.body = noteFromJson({ body: t.body }).body; return note; }
+    // Written before secret text was sealed: readable as it is, sealed on the next write.
+    if (!o.enc && (o.title || o.body)) return note;
+    return null;
+  }
+
+  async load() {
     const s = await files.readText("sync_state.json");
     if (s) {
       const raw = JSON.parse(s) as Record<string, { base: unknown; ver: string; tomb: number }>;
-      for (const [id, e] of Object.entries(raw)) this.state[id] = { base: e.base ? noteFromJson(e.base) : null, ver: e.ver, tomb: e.tomb };
+      for (const [id, e] of Object.entries(raw)) {
+        const base = e.base ? await this.fromDisk(e.base) : null;
+        // A sealed base that can't be opened is forgotten, which only makes the next sync compare afresh.
+        this.state[id] = { base, ver: base || !e.base ? e.ver : "", tomb: e.tomb };
+      }
     }
+    const n = await files.readText("notes.json");
+    if (n) for (const o of JSON.parse(n)) {
+      const note = await this.fromDisk(o);
+      if (note) this.map.set(note.id, note); else this.locked.set(String(o.id), o);
+    }
+    const d = await files.readText("deleted.json");
+    if (d) this.tombs = JSON.parse(d);
     this.pruneTombs();
   }
 
@@ -52,14 +79,8 @@ export class LocalStore implements Store {
 
   private async persistNotes() {
     const out: Record<string, unknown>[] = [];
-    for (const n of this.map.values()) {
-      const o = noteToJson(n);
-      if (n.secret && this.dataKey) {                    // never write the text of a secret note in the clear
-        o.enc = await sealSecret(this.dataKey, { title: n.title, body: n.body });
-        o.title = ""; o.body = "";
-      }
-      out.push(o);
-    }
+    for (const n of this.map.values()) out.push(await this.toDisk(n));
+    for (const [id, o] of this.locked) if (!this.map.has(id)) out.push(o);
     await files.writeText("notes.json", JSON.stringify(out));
     await files.writeText("deleted.json", JSON.stringify(this.tombs));
   }
@@ -110,7 +131,9 @@ export class LocalStore implements Store {
   async syncState() { return structuredClone(this.state); }
   async saveSyncState(s: Record<string, StateEntry>) {
     this.state = structuredClone(s);
-    await files.writeText("sync_state.json", JSON.stringify(s));
+    const out: Record<string, unknown> = {};
+    for (const [id, e] of Object.entries(s)) out[id] = { base: e.base ? await this.toDisk(e.base) : null, ver: e.ver, tomb: e.tomb };
+    await files.writeText("sync_state.json", JSON.stringify(out));
   }
   async imageExists(name: string) { return files.hasAttachment(name); }
   async readImage(name: string) { const b = await files.readAttachment(name); return b ? b64ToBytes(b) : new Uint8Array(); }
@@ -119,8 +142,8 @@ export class LocalStore implements Store {
   async applySynced(puts: Map<string, Note>, removes: Map<string, number>, seenRev: Map<string, number>) {
     const skipped = new Set<string>();
     const still = (id: string) => (this.map.get(id)?.rev ?? -1) === (seenRev.get(id) ?? -1);
-    for (const [id, n] of puts) { if (still(id)) { this.map.set(id, n); delete this.tombs[id]; } else skipped.add(id); }
-    for (const [id, at] of removes) { if (still(id)) { this.map.delete(id); this.tombs[id] = at; } else skipped.add(id); }
+    for (const [id, n] of puts) { if (still(id)) { this.map.set(id, n); this.locked.delete(id); delete this.tombs[id]; } else skipped.add(id); }
+    for (const [id, at] of removes) { if (still(id)) { this.map.delete(id); this.locked.delete(id); this.tombs[id] = at; } else skipped.add(id); }
     await this.persistNotes();
     this.fire();
     return skipped;

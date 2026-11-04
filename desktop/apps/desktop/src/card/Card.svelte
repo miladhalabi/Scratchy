@@ -5,6 +5,7 @@
   import { canonical, fixedColors, pickCardNote, type Note } from "@scratchy/core";
   import RichEditor from "../lib/editor/RichEditor.svelte";
   import { startEngine, store } from "../lib/engine";
+  import { syncIfStale } from "../lib/sync";
   import { Genie, nearestEdge } from "./genie";
   import { Spring, Tracker, accelDecel, clamp, decelerate, easeOut, project } from "./motion";
   import { loadCard, saveCard, type CardState } from "./prefs";
@@ -88,6 +89,19 @@
     editor.load(note.body);
   }
 
+  /** A change from sync or the notes window: shown at once, unless there is typing here it would undo. */
+  function refresh() {
+    if (!note) return;
+    const cur = store.get(note.id);
+    if (!cur || cur === note) return;
+    if (title === cur.title && editor.markdown() === canonical(cur.body)) { note = cur; return; }     // our own save
+    if (title !== note.title || editor.markdown() !== canon) return;                                    // mid-edit: ours wins
+    note = cur;
+    title = cur.title;
+    canon = canonical(cur.body);
+    editor.load(cur.body);
+  }
+
   // ---- open and close ----
 
   let anim: { cancel(): void; t(): number } | null = null;
@@ -135,6 +149,7 @@
     anim?.cancel();
     phase = "opening";
     if (!reverse) { pick(); flushSync(); fit(); place(); }
+    syncIfStale();
     invoke("card_keyboard", { exclusive: !pinned }).catch(() => {});
     syncInput();
 
@@ -319,6 +334,7 @@
       x = prefs.x ?? W() - w - 48;
       y = prefs.y ?? (H() - h) / 2;
       await startEngine();
+      store.onChange(refresh);
       // Ready before the first open: the note it would open on, already cut into genie strips.
       pick(); flushSync(); fit(); place();
       if (prefs.anim === "genie") stripsFor().hide();

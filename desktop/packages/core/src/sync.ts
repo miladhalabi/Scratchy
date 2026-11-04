@@ -63,6 +63,42 @@ export async function connect(drive: DriveApi, password: string): Promise<Uint8A
   return key;
 }
 
+/**
+ * Re-encrypts everything in Drive with a key made from `newPassword` (port of Sync.rekey). Safe to repeat if it
+ * was cut short: files already done are recognised and skipped, and the new salt is kept by the caller
+ * (`pendingSalt`) until the very end. Returns the new key; meta.json is written last.
+ */
+export async function rekey(
+  drive: DriveApi, oldKey: Uint8Array, newPassword: string,
+  pendingSalt: { get(): Promise<Uint8Array | null>; set(s: Uint8Array | null): Promise<void> },
+): Promise<Uint8Array> {
+  const files = await drive.list();
+  const meta = files.get(META_FILE);
+  if (!meta) throw new Error("Drive has no sync info yet. Sync once first.");
+  let salt = await pendingSalt.get();
+  if (!salt) { salt = randomBytes(16); await pendingSalt.set(salt); }
+  const newKey = await deriveKey(newPassword, salt);
+  for (const [name, r] of files) {
+    if (!(name.startsWith(NOTE_PREFIX) && name.endsWith(NOTE_SUFFIX)) && !name.startsWith(IMG_PREFIX)) continue;
+    const blob = await drive.download(r.id);
+    const plain = await open(oldKey, blob);
+    if (plain == null) {
+      if ((await open(newKey, blob)) != null) continue;               // already done in an earlier attempt
+      throw new Error(`Couldn't read ${name}`);
+    }
+    await drive.upload(r.id, name, await seal(newKey, plain));
+  }
+  const o = JSON.parse(new TextDecoder().decode(await drive.download(meta.id)));
+  o.salt = toBase64(salt);
+  o.check = toBase64(await sealText(newKey, "scratchy"));
+  o.epoch = (o.epoch ?? 0) + 1;
+  await drive.upload(meta.id, META_FILE, json(o));
+  const old = files.get("notes.enc");                                  // old backup, still readable with the old password
+  if (old) await drive.delete(old.id);
+  await pendingSalt.set(null);
+  return newKey;
+}
+
 export async function syncNow(d: SyncDeps): Promise<SyncResult> {
   const { drive, store, key } = d;
   const now = d.now ?? Date.now;

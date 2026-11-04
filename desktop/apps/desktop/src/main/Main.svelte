@@ -2,10 +2,13 @@
   import { onMount, tick } from "svelte";
   import { canonicalCategory, categoryNames, cleanCategory, CATEGORY_MAX, newNote, noteHeading, plain, type Note } from "@scratchy/core";
   import { notes } from "../lib/notes";
+  import type { SyncStatus } from "../lib/sync";
   import { preview } from "../lib/preview";
   import { applyTheme } from "../lib/theme";
   import Sheet, { type SheetItem } from "../lib/Sheet.svelte";
   import NotePage from "./NotePage.svelte";
+  import Settings from "./Settings.svelte";
+  import VaultGate from "./VaultGate.svelte";
   import Thumb from "./Thumb.svelte";
   import "../lib/editor/editor.css";
 
@@ -25,14 +28,20 @@
   let sheet: { title: string; items?: SheetItem[]; field?: { label: string; value: string; max?: number }; confirm?: { label: string; danger?: boolean; run: (v: string) => void } } | null = $state(null);
   let searchEl: HTMLInputElement = $state()!;
   let width = $state(1000);
+  let sync: SyncStatus = $state({ connected: false, state: "off", text: "", needsPassword: false, needsSignIn: false });
+  let vaultSetUp = $state(false);
+  let settings = $state(false);
+  /** The vault: secret notes only, behind the password. Opened with Ctrl+Shift+L, and nothing on screen says so. */
+  let secret = $state(false);
+  let gate = $state(false);
+  let notice: { text: string; timer: ReturnType<typeof setTimeout> } | null = $state(null);
 
-  // The vault comes with sync; until then secret notes stay out of sight.
-  const visible = $derived(all.filter((n) => !n.secret));
-  const categories = $derived(categoryNames(visible));
+  const visible = $derived(all.filter((n) => n.secret === secret));
+  const categories = $derived(categoryNames(all.filter((n) => !n.secret)));
   const shown = $derived.by(() => {
     const q = query.trim().toLowerCase();
     return visible
-      .filter((n) => !filter || n.category === filter)
+      .filter((n) => secret || !filter || n.category === filter)
       .filter((n) => !q || n.title.toLowerCase().includes(q) || n.body.split("\n").map(plain).join("\n").toLowerCase().includes(q) || n.category.toLowerCase().includes(q))
       .sort((a, b) => Number(b.pinned) - Number(a.pinned) || b.updatedAt - a.updatedAt);
   });
@@ -50,8 +59,24 @@
 
   function create() {
     menu = null;
-    open = { ...newNote(crypto.randomUUID()), category: filter };
+    open = { ...newNote(crypto.randomUUID()), secret, category: secret ? "" : filter };
   }
+
+  // ---- the vault ----
+
+  const GRACE_MS = 30_000;              // how long the vault stays open after you leave the window
+  let away: ReturnType<typeof setTimeout> | undefined;
+  function lock() {
+    clearTimeout(away);
+    if (open?.secret) open = null;
+    secret = false; gate = false; query = "";
+  }
+  function vaultKey() {
+    if (secret) lock();
+    else { open = null; settings = false; gate = true; }
+  }
+  function blurred() { if (secret) { clearTimeout(away); away = setTimeout(lock, GRACE_MS); } }
+  function focused() { clearTimeout(away); notes.seen().catch(() => {}); }
   function edit(n: Note) { menu = null; open = n; }
 
   function remove(n: Note) {
@@ -88,8 +113,10 @@
   }
 
   function keys(e: KeyboardEvent) {
-    if (open || sheet) return;
     const mod = e.ctrlKey || e.metaKey;
+    if (mod && e.shiftKey && e.code === "KeyL") { e.preventDefault(); vaultKey(); return; }
+    if (open || sheet || settings || gate) return;
+    if (mod && e.key === ",") { e.preventDefault(); settings = true; return; }
     if (mod && e.key.toLowerCase() === "n") { e.preventDefault(); create(); }
     else if (mod && e.key.toLowerCase() === "f") { e.preventDefault(); searchEl.focus(); searchEl.select(); }
     else if (mod && e.key.toLowerCase() === "z" && undo) { e.preventDefault(); restore(); }
@@ -97,6 +124,7 @@
       if (menu) menu = null;
       else if (query) { query = ""; searchEl.blur(); }
       else if (filter) filter = "";
+      else if (secret) lock();
     }
   }
   function cardKeys(e: KeyboardEvent, n: Note) {
@@ -113,21 +141,35 @@
   }
 
   onMount(() => {
-    const off = notes.watch((ns) => { all = ns; ready = true; });
-    return () => { off.then((f) => f()); };
+    const off = notes.watch((s) => { all = s.notes; sync = s.sync; vaultSetUp = s.vault.setUp; ready = true; });
+    const offNotice = notes.onNotice((text) => {
+      if (notice) clearTimeout(notice.timer);
+      notice = { text, timer: setTimeout(() => (notice = null), 8000) };
+    });
+    return () => { off.then((f) => f()); offNotice.then((f) => f()); };
   });
 </script>
 
-<svelte:window onkeydown={keys} onclick={() => (menu = null)} bind:innerWidth={width} />
+<svelte:window onkeydown={keys} onclick={() => (menu = null)} onblur={blurred} onfocus={focused} bind:innerWidth={width} />
 
 <div class="app">
   {#if live}
     <NotePage note={live} {categories} onback={back} ondelete={remove} />
+  {:else if settings}
+    <Settings {sync} {vaultSetUp} onback={() => (settings = false)} />
   {:else}
+    {#if secret}
+      <div class="vaultbar">
+        <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M18 8h-1V6A5 5 0 0 0 7 6v2H6a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V10a2 2 0 0 0-2-2m-6 9a2 2 0 1 1 0-4 2 2 0 0 1 0 4M15.1 8H8.9V6a3.1 3.1 0 0 1 6.2 0z" /></svg>
+        <strong>Secret</strong>
+        <span class="grow"></span>
+        <button onclick={lock}>Lock</button>
+      </div>
+    {/if}
     <header>
       <div class="search">
         <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><circle cx="11" cy="11" r="6.5" fill="none" stroke="currentColor" stroke-width="1.8" /><path d="m16 16 4 4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" /></svg>
-        <input bind:this={searchEl} bind:value={query} placeholder="Search notes" spellcheck="false" dir="auto"
+        <input bind:this={searchEl} bind:value={query} placeholder={secret ? "Search secret notes" : "Search notes"} spellcheck="false" dir="auto"
           onkeydown={(e) => { if (e.key === "ArrowDown" || e.key === "Enter") { e.preventDefault(); document.querySelector<HTMLElement>(".note")?.focus(); } }} />
         {#if query}<button class="clear" onclick={() => { query = ""; searchEl.focus(); }} aria-label="Clear search">×</button>{/if}
       </div>
@@ -135,9 +177,15 @@
         <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" /></svg>
         New note
       </button>
+      <button class="gear" onclick={() => (settings = true)} title="Settings (Ctrl+,)" aria-label="Settings">
+        <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M12 15.2a3.2 3.2 0 1 0 0-6.4 3.2 3.2 0 0 0 0 6.4Z" fill="none" stroke="currentColor" stroke-width="1.7" /><path d="M19.4 13.5a7.6 7.6 0 0 0 0-3l2-1.6-2-3.4-2.4 1a7.6 7.6 0 0 0-2.6-1.5L14 2.5h-4l-.4 2.5A7.6 7.6 0 0 0 7 6.5l-2.4-1-2 3.4 2 1.6a7.6 7.6 0 0 0 0 3l-2 1.6 2 3.4 2.4-1a7.6 7.6 0 0 0 2.6 1.5l.4 2.5h4l.4-2.5a7.6 7.6 0 0 0 2.6-1.5l2.4 1 2-3.4z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" /></svg>
+      </button>
     </header>
+    {#if sync.connected && !secret}
+      <button class="syncline" class:warn={sync.state === "attention"} onclick={() => (settings = true)}>{sync.text}</button>
+    {/if}
 
-    {#if categories.length}
+    {#if categories.length && !secret}
       <div class="chips" role="tablist" aria-label="Categories">
         <button class="chip" class:on={!filter} role="tab" aria-selected={!filter} onclick={() => (filter = "")}>All</button>
         {#each categories as c}
@@ -154,7 +202,7 @@
           {#if query || filter}
             <p>Nothing matches.</p>
           {:else}
-            <p>No notes yet.</p>
+            <p>{secret ? "No secret notes yet." : "No notes yet."}</p>
             <button class="new" onclick={create}>Write the first one</button>
           {/if}
         </div>
@@ -185,7 +233,9 @@
     </main>
   {/if}
 
-  {#if undo}
+  {#if notice}
+    <div class="undo" role="status"><span>{notice.text}</span><button onclick={() => (notice = null)}>OK</button></div>
+  {:else if undo}
     <div class="undo" role="status">
       <span>Note deleted</span>
       <button onclick={restore}>Undo</button>
@@ -199,13 +249,17 @@
   <div class="menu" style="left:{menu.x}px; top:{menu.y}px" role="menu" tabindex="-1" onclick={(e) => e.stopPropagation()}>
     <button role="menuitem" onclick={() => edit(n)}>Open</button>
     <button role="menuitem" onclick={() => togglePin(n)}>{n.pinned ? "Unpin" : "Pin"}</button>
-    <button role="menuitem" onclick={() => pickCategory(n)}>Category…</button>
+    {#if !n.secret}<button role="menuitem" onclick={() => pickCategory(n)}>Category…</button>{/if}
     <button role="menuitem" class="danger" onclick={() => remove(n)}>Delete</button>
   </div>
 {/if}
 
 {#if sheet}
   <Sheet {...sheet} onclose={() => (sheet = null)} />
+{/if}
+
+{#if gate}
+  <VaultGate setUp={vaultSetUp} onopen={() => { gate = false; secret = true; query = ""; filter = ""; }} onclose={() => (gate = false)} />
 {/if}
 
 <style>
@@ -230,6 +284,21 @@
   .new:hover { filter: brightness(1.06); }
   .new:active { transform: scale(0.97); }
 
+  .gear {
+    flex: none; width: 44px; height: 44px; border: 0; border-radius: 22px; display: grid; place-items: center;
+    background: transparent; color: var(--secondary); cursor: pointer;
+  }
+  .gear:hover { background: var(--wash); color: var(--text); }
+  .syncline {
+    flex: none; align-self: center; margin: -2px 0 4px; padding: 2px 10px; border: 0; border-radius: 8px; background: transparent;
+    color: var(--secondary); font: inherit; font-size: 12.5px; cursor: pointer;
+  }
+  .syncline:hover { color: var(--text); }
+  .syncline.warn { color: var(--danger); font-weight: 600; }
+  .vaultbar { flex: none; display: flex; align-items: center; gap: 8px; padding: 12px 20px 0; color: var(--accent); }
+  .vaultbar strong { font-size: 17px; letter-spacing: -0.01em; }
+  .vaultbar .grow { flex: 1; }
+  .vaultbar button { border: 0; border-radius: 12px; padding: 7px 14px; background: var(--wash); color: var(--accent); font: inherit; font-weight: 600; cursor: pointer; }
   .chips { flex: none; display: flex; gap: 6px; padding: 4px 16px 8px; overflow-x: auto; scrollbar-width: none; }
   .chip {
     flex: none; border: 1px solid var(--hairline); border-radius: 999px; padding: 6px 14px; background: transparent; color: var(--secondary);

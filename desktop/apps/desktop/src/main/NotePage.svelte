@@ -102,7 +102,7 @@
       <svg viewBox="0 0 24 24" width="20" height="20"><path d="M15 5 8 12l7 7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" /></svg>
     </button>
     <span class="grow"></span>
-    <button class="chip" class:set={!!category} onclick={pickCategory} title="Category">{category || "Category"}</button>
+    {#if !note.secret}<button class="chip" class:set={!!category} onclick={pickCategory} title="Category">{category || "Category"}</button>{/if}
     <button class="icon" class:on={panel} onclick={() => (panel = !panel)} title="Format" aria-label="Format" aria-pressed={panel}><span class="aa">Aa</span></button>
     <button class="icon" class:on={pinned} onclick={() => { pinned = !pinned; save(); }} title={pinned ? "Unpin" : "Pin"} aria-label="Pin" aria-pressed={pinned}>
       <svg viewBox="0 0 24 24" width="19" height="19"><path d="M14.5 3.5 20.5 9.5 17 11l-3.5 3.5.5 4-1.5 1.5-3.5-3.5L5 20.5 3.5 19 7.5 15 4 11.5 5.5 10l4 .5L13 7z" fill={pinned ? "currentColor" : "none"} stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" /></svg>

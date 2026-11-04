@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { connect, deriveKey, relayChanges, WrongPassword } from "../src";
+import { connect, deriveKey, rekey, relayChanges, WrongPassword } from "../src";
 import { Device, FakeDrive } from "./helpers";
 
 let drive: FakeDrive, key: Uint8Array, room: Device[], A: Device, B: Device;
@@ -230,5 +230,39 @@ describe("relayChanges", () => {
     expect(await A.relayNow(["n", "ghost"])).toBe(1);
     await B.receive();
     expect(B.store.get("n")).toBeUndefined();
+  });
+});
+
+describe("changing the vault password", () => {
+  const holder = () => { let s: Uint8Array | null = null; return { get: async () => s, set: async (v: Uint8Array | null) => { s = v; } }; };
+
+  it("re-encrypts every note, so the new password works everywhere and the old one is refused", async () => {
+    A.store.save({ id: "n1", title: "Kept", body: "safe" }, 1000);
+    await A.sync();
+    const newKey = await rekey(drive, key, "newpass", holder());
+    expect(await connect(drive, "newpass")).toEqual(newKey);
+    await expect(connect(drive, "pw1234")).rejects.toBeInstanceOf(WrongPassword);
+    const C = new Device("C", drive, newKey, room);
+    await C.sync();
+    expect(C.store.get("n1")!.body).toBe("safe");
+    await expect(B.sync()).rejects.toBeInstanceOf(WrongPassword);        // a device still on the old key is told
+  });
+
+  it("can be run again after being cut short", async () => {
+    A.store.save({ id: "n1", title: "One" }, 1000);
+    A.store.save({ id: "n2", title: "Two" }, 1000);
+    await A.sync();
+    const salt = holder();
+    const failing = Object.create(drive) as FakeDrive;
+    let uploads = 0;
+    failing.upload = async (...a: Parameters<FakeDrive["upload"]>) => { if (++uploads > 1) throw new Error("cut"); return drive.upload(...a); };
+    await expect(rekey(failing, key, "newpass", salt)).rejects.toThrow("cut");
+    expect(await salt.get()).not.toBeNull();                              // the new salt is kept for the retry
+    const newKey = await rekey(drive, key, "newpass", salt);
+    expect(await salt.get()).toBeNull();
+    const C = new Device("C", drive, newKey, room);
+    await C.sync();
+    expect(C.store.get("n1")!.title).toBe("One");
+    expect(C.store.get("n2")!.title).toBe("Two");
   });
 });
