@@ -194,6 +194,34 @@ class OverlayService : Service() {
 
     private fun restX(right: Boolean) = if (right) screenW - zoneW else 0
 
+    /** The bar's height is kept as a share of the screen, so it sits in the same place in portrait and landscape. */
+    private fun savedY(prefs: android.content.SharedPreferences): Int {
+        val f = prefs.getFloat("yf", -1f)
+        val y = if (f >= 0f) minY + f * (maxY - minY) else prefs.getInt("y", dp(260)).toFloat()
+        return y.toInt().coerceIn(minY, maxY)
+    }
+
+    private fun shareOf(y: Float) = if (maxY > minY) ((y - minY) / (maxY - minY)).coerceIn(0f, 1f) else 0f
+
+    /** Rotation: put the bar back on its edge, and keep an open card on screen. */
+    override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
+        super.onConfigurationChanged(newConfig)
+        if (!::zone.isInitialized) return
+        xAnim?.cancel(); yAnim?.cancel()
+        zoneParams.x = restX(onRight)
+        zoneParams.y = savedY(overlayPrefs)
+        updateZone()
+        val p = panel; val lp = panelLp
+        if (p != null && lp != null) {
+            val m = dp(10)
+            lp.width = lp.width.coerceAtMost(screenW)
+            lp.height = lp.height.coerceAtMost(screenH - dp(24))
+            lp.x = lp.x.coerceIn(-m, (screenW - lp.width + m).coerceAtLeast(-m))
+            lp.y = lp.y.coerceIn(0, (screenH - lp.height + m).coerceAtLeast(0))
+            runCatching { wm.updateViewLayout(p, lp) }
+        }
+    }
+
     private fun placeBar() {
         bar.onRight = onRight
     }
@@ -223,7 +251,7 @@ class OverlayService : Service() {
         ).apply {
             gravity = Gravity.TOP or Gravity.START
             x = restX(onRight)
-            y = prefs.getInt("y", dp(260)).coerceIn(minY, maxY)
+            y = savedY(prefs)
         }
 
         // mode: 0 undecided, 1 vertical drag, 2 free move (after long-press), 3 swiped open
@@ -343,7 +371,8 @@ class OverlayService : Service() {
                 setStartVelocity(vy); minimumVisibleChange = 1f; start()
             }
         }
-        prefs.edit().putBoolean("right", onRight).putInt("y", targetY.toInt()).apply()
+        prefs.edit().putBoolean("right", onRight).putInt("y", targetY.toInt())
+            .putFloat("yf", shareOf(targetY)).apply()
         if (switchSide && !reduced) main.postDelayed({ bar.landing() }, 240)   // squash as it lands on the edge
         scheduleTuck()
     }
