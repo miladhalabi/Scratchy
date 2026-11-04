@@ -149,6 +149,7 @@ class OverlayService : Service() {
         main.removeCallbacks(pendingPulse)
         main.removeCallbacks(expirePending)
         main.removeCallbacks(clearPending)
+        main.removeCallbacks(prepareCard)
         editor?.commit()
         panel?.let { runCatching { wm.removeView(it) } }
         runCatching { wm.removeView(zone) }
@@ -220,6 +221,7 @@ class OverlayService : Service() {
         zoneParams.x = restX(onRight)
         zoneParams.y = savedY(overlayPrefs)
         updateZone()
+        prepared = null; if (panel == null) schedulePrepare()
         val p = panel; val lp = panelLp
         if (p != null && lp != null) {
             val m = dp(10)
@@ -339,6 +341,7 @@ class OverlayService : Service() {
         wm.addView(zone, zoneParams)
         scheduleTuck(2000)
         main.postDelayed(breathRunnable, 6_000)
+        schedulePrepare(1500)
     }
 
     /** The side can be changed from Settings; the bar then glides across and the card follows it. */
@@ -468,6 +471,7 @@ class OverlayService : Service() {
 
     /** Tap or inward swipe on the bar: open the card, or close it if it is already open. */
     private fun toggleCard() {
+        Perf.start(if (panel != null) "close" else "open")
         if (panel != null) collapse() else expand()
     }
 
@@ -484,8 +488,45 @@ class OverlayService : Service() {
         pal = Palette(this)                     // pick up wallpaper / dark-mode changes since the last open
         if (pendingShot == null) bar.setTint(pal.accent)
         panelOpen = true
-        main.removeCallbacks(tuckRunnable)
+        main.removeCallbacks(tuckRunnable); main.removeCallbacks(prepareCard)
+        Perf.mark("setup")
+        val (startNote, continuing) = CardNote.pick(this)
+        Perf.mark("pick note")
+        val ready = prepared?.takeIf { it.key == cardKey() }
+        prepared = null
+        val c = ready ?: buildCard(startNote)
+        Perf.mark(if (ready != null) "card was ready" else "card built")
+        c.show(startNote, continuing)
+    }
 
+    /** A card built ahead of time; [show] puts it on screen with the note to open. Each one is shown once. */
+    private class Card(val key: String, val show: (Note, Boolean) -> Unit)
+    private var prepared: Card? = null
+
+    /** Builds the next card while nothing is happening, so a tap on the bar only has to show it. */
+    private val prepareCard = Runnable {
+        if (panel == null && prepared == null) {
+            pal = Palette(this)
+            prepared = buildCard(CardNote.pick(this).first)
+        }
+    }
+
+    private fun schedulePrepare(delay: Long = 700) {
+        main.removeCallbacks(prepareCard); main.postDelayed(prepareCard, delay)
+    }
+
+    /** Everything the built card depends on; if any of it changed, the ready card is thrown away. */
+    private fun cardKey(): String {
+        val o = overlayPrefs
+        return listOf(
+            pal.signature, Appearance.blurRadiusPx(this), Appearance.opacity(this), Appearance.isGlass(this),
+            screenW, screenH, onRight, o.getBoolean("card_pinned", false),
+            o.getInt("pw", -1), o.getInt("ph", -1), o.getInt("px", -1), o.getInt("py", -1),
+        ).joinToString("/")
+    }
+
+    private fun buildCard(startNote: Note): Card {
+        val key = cardKey()
         // With blur on, the window is exactly the card: the system blurs the whole window rectangle,
         // so a margin for the shadow would show blurred strips around the card.
         val blurPx = Appearance.blurRadiusPx(this)
@@ -498,18 +539,11 @@ class OverlayService : Service() {
         val panelH = saved.getInt("ph", (screenH * if (screenW > screenH) 0.8f else 0.46f).toInt())
             .coerceIn(minH, screenH - topLimit - margin * 2)
 
-        val (startNote, continuing) = CardNote.pick(this)
         val ed = NoteEditor(ui, pal, startNote, compact = true) {
+            val t0 = android.os.SystemClock.uptimeMillis()
             NoteStore.save(this, it)
+            android.util.Log.i("ScratchyPerf", "autosave ${android.os.SystemClock.uptimeMillis() - t0} ms")
             if (!it.isBlank) CardNote.remember(this, it.id)
-        }
-        editor = ed
-        Sync.onChangedCard = {                      // a sync changed notes while the card is open
-            NoteStore.get(this, ed.note.id)?.let { ed.refreshFrom(it) }
-        }
-        Sync.syncIfStale(this)
-        if (shotMode() == "auto") {
-            pendingShot?.let { ed.addImage(it); clearPending.run(); main.removeCallbacks(clearPending) }
         }
 
         val content = FrameLayout(ui)
@@ -620,7 +654,7 @@ class OverlayService : Service() {
         }
         val continueRow = LinearLayout(ui).apply {
             gravity = Gravity.CENTER_VERTICAL
-            visibility = if (continuing) View.VISIBLE else View.GONE
+            visibility = View.GONE
             addView(continueInfo, LinearLayout.LayoutParams(0, -2, 1f))
             addView(TextView(ui).apply {
                 text = "＋ New note"
@@ -680,7 +714,6 @@ class OverlayService : Service() {
             chooser.visibility = View.GONE
             if (recents.visibility != View.VISIBLE) ed.visibility = View.VISIBLE
         }
-        hideChooserRef = { hideChooser() }
         fun attachNow(uri: Uri) {
             ed.addImage(uri)
             main.removeCallbacks(clearPending); clearPending.run()
@@ -739,8 +772,6 @@ class OverlayService : Service() {
             chooser.visibility = View.VISIBLE
             chooserOpen = true
         }
-        showShotPrompt = { if (shotMode() == "ask") showChooser() }
-        if (pendingShot != null && shotMode() == "ask") showChooser()
         showContinuing = { n ->
             if (n == null) continueRow.visibility = View.GONE
             else {
@@ -816,92 +847,129 @@ class OverlayService : Service() {
                 blurBehindRadius = blurPx
             }
         }
-        panelLp = lp
-        panelFocusable = !cardPinned
-        // Pinned cards take focus only when you touch a text field, so the app behind keeps working.
-        ed.onTouched = { v ->
-            if (cardPinned && !panelFocusable) {
-                setPanelFocusable(true)
-                main.postDelayed({
-                    v.requestFocus()
-                    (getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager)
-                        .showSoftInput(v, InputMethodManager.SHOW_IMPLICIT)
-                }, 150)
-            }
-        }
-        // Tapping outside the card must only close it. Without this the same tap also reaches the app
-        // underneath (a button, a video...). A see-through full-screen window under the card catches it.
-        addDismissCatcher()
-        val style = animStyle()
-        val genieOpen = style == "genie" && !reduced
-        if (genieOpen) {
-            p.alpha = 0f                       // the real card stays invisible until the genie lands
-            if (blurPx > 0 && Build.VERSION.SDK_INT >= 31) lp.blurBehindRadius = 0   // blur fades in with the genie
-        }
-        wm.addView(p, lp)
-        panel = p
-        // The bar stays visible while the card is open, and tapping it closes the card. Windows stack in
-        // the order they were added, so put the bar back on top of the card and the catcher.
-        main.removeCallbacks(tuckRunnable)
-        bar.wake()
-        main.post { raiseBar() }
+        // Measure it now, while nothing is on screen, so attaching the window has little left to do.
+        p.measure(View.MeasureSpec.makeMeasureSpec(lp.width, View.MeasureSpec.EXACTLY),
+            View.MeasureSpec.makeMeasureSpec(lp.height, View.MeasureSpec.EXACTLY))
+        p.layout(0, 0, lp.width, lp.height)
 
-        fun savePanel() = saved.edit()
-            .putInt("px", lp.x).putInt("py", lp.y)
-            .putInt("pw", lp.width - margin * 2).putInt("ph", lp.height - margin * 2).apply()
-
-        // Move: drag the header 1:1, kept fully on screen.
-        var gx = 0f; var gy = 0f; var sx = 0; var sy = 0
-        header.setOnTouchListener { v, e ->
-            when (e.actionMasked) {
-                MotionEvent.ACTION_DOWN -> { gx = e.rawX; gy = e.rawY; sx = lp.x; sy = lp.y }
-                MotionEvent.ACTION_MOVE -> {
-                    lp.x = (sx + e.rawX - gx).toInt().coerceIn(-margin, screenW - lp.width + margin)
-                    lp.y = (sy + e.rawY - gy).toInt().coerceIn(topLimit - margin, screenH - lp.height + margin)
-                    runCatching { wm.updateViewLayout(p, lp) }
-                }
-                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> savePanel()
+        return Card(key) { shownNote, continuing ->
+            if (ed.note != shownNote) ed.load(shownNote)
+            editor = ed
+            Sync.onChangedCard = {                      // a sync changed notes while the card is open
+                NoteStore.get(this, ed.note.id)?.let { ed.refreshFrom(it) }
             }
-            true
-        }
-        // Resize: drag the corner grip, kept within the screen and above a minimum size.
-        var sw = 0; var sh = 0
-        grip.setOnTouchListener { _, e ->
-            when (e.actionMasked) {
-                MotionEvent.ACTION_DOWN -> { gx = e.rawX; gy = e.rawY; sw = lp.width; sh = lp.height }
-                MotionEvent.ACTION_MOVE -> {
-                    lp.width = (sw + e.rawX - gx).toInt().coerceIn(minW + margin * 2, screenW - lp.x + margin)
-                    lp.height = (sh + e.rawY - gy).toInt().coerceIn(minH + margin * 2, screenH - lp.y + margin)
-                    runCatching { wm.updateViewLayout(p, lp) }
-                }
-                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> savePanel()
+            Sync.syncIfStale(this)
+            if (shotMode() == "auto") {
+                pendingShot?.let { ed.addImage(it); clearPending.run(); main.removeCallbacks(clearPending) }
             }
-            true
-        }
-
-        if (genieOpen) {
-            // Grow out of the bar: snapshot the laid-out card, play the genie backwards, then reveal it.
-            whenSized(p) {
-                val bmp = capture(p)
-                val loc = IntArray(2); p.getLocationOnScreen(loc)
-                if (blurPx > 0) animateBlur(p, lp, 0, blurPx, genieMs(420))
-                runGenie(bmp, loc[0], loc[1], opening = true, live = p,
-                    cardAlpha = Appearance.opacity(this) / 100f) {
+            showContinuing(if (continuing) shownNote else null)
+            hideChooserRef = { hideChooser() }
+            showShotPrompt = { if (shotMode() == "ask") showChooser() }
+            if (pendingShot != null && shotMode() == "ask") showChooser()
+            panelLp = lp
+            panelFocusable = !cardPinned
+            // Pinned cards take focus only when you touch a text field, so the app behind keeps working.
+            ed.onTouched = { v ->
+                if (cardPinned && !panelFocusable) {
+                    setPanelFocusable(true)
+                    main.postDelayed({
+                        v.requestFocus()
+                        (getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager)
+                            .showSoftInput(v, InputMethodManager.SHOW_IMPLICIT)
+                    }, 150)
                 }
             }
-        } else if (style == "slide" && !reduced) {
-            // Slide in from the same edge the bar sits on.
-            val off = (panelW + margin * 2).toFloat() * (if (onRight) 1 else -1)
-            p.translationX = off; p.alpha = 0f
-            Motion.spring(p, DynamicAnimation.TRANSLATION_X, 0f, 1f, 0.38f)
-            Motion.spring(p, DynamicAnimation.ALPHA, 1f, 1f, 0.25f)
-        }
-        if (!cardPinned && pendingShot == null || !cardPinned && shotMode() != "ask") {
-            ed.bodyEdit.requestFocus()
-            main.postDelayed({
-                (getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager)
-                    .showSoftInput(ed.bodyEdit, InputMethodManager.SHOW_IMPLICIT)
-            }, 120)
+            // Tapping outside the card must only close it. Without this the same tap also reaches the app
+            // underneath (a button, a video...). A see-through full-screen window under the card catches it.
+            addDismissCatcher()
+            val style = animStyle()
+            val genieOpen = style == "genie" && !reduced
+            if (genieOpen) {
+                p.alpha = 0f                       // the real card stays invisible until the genie lands
+                if (blurPx > 0 && Build.VERSION.SDK_INT >= 31) lp.blurBehindRadius = 0   // blur fades in with the genie
+                // The keyboard waits for the genie to land (below), so its slide-in doesn't cost the genie frames.
+                lp.softInputMode = WindowManager.LayoutParams.SOFT_INPUT_STATE_UNCHANGED or
+                    WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING
+            }
+            Perf.mark("note loaded")
+            p.viewTreeObserver.addOnDrawListener(object : android.view.ViewTreeObserver.OnDrawListener {
+                var seen = false
+                override fun onDraw() { if (!seen) { seen = true; Perf.mark("first draw") } }
+            })
+            wm.addView(p, lp)
+            Perf.mark("window added")
+            panel = p
+            // The bar stays visible while the card is open, and tapping it closes the card. Windows stack in
+            // the order they were added, so put the bar back on top of the card and the catcher.
+            // During the genie that waits until it lands: re-adding a window mid-animation costs frames.
+            main.removeCallbacks(tuckRunnable)
+            bar.wake()
+            if (!genieOpen) main.post { raiseBar() }
+            val typing = !cardPinned && pendingShot == null || !cardPinned && shotMode() != "ask"
+            fun askKeyboard() = (getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager)
+                .showSoftInput(ed.bodyEdit, InputMethodManager.SHOW_IMPLICIT)
+
+            fun savePanel() = saved.edit()
+                .putInt("px", lp.x).putInt("py", lp.y)
+                .putInt("pw", lp.width - margin * 2).putInt("ph", lp.height - margin * 2).apply()
+
+            // Move: drag the header 1:1, kept fully on screen.
+            var gx = 0f; var gy = 0f; var sx = 0; var sy = 0
+            header.setOnTouchListener { v, e ->
+                when (e.actionMasked) {
+                    MotionEvent.ACTION_DOWN -> { gx = e.rawX; gy = e.rawY; sx = lp.x; sy = lp.y }
+                    MotionEvent.ACTION_MOVE -> {
+                        lp.x = (sx + e.rawX - gx).toInt().coerceIn(-margin, screenW - lp.width + margin)
+                        lp.y = (sy + e.rawY - gy).toInt().coerceIn(topLimit - margin, screenH - lp.height + margin)
+                        runCatching { wm.updateViewLayout(p, lp) }
+                    }
+                    MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> savePanel()
+                }
+                true
+            }
+            // Resize: drag the corner grip, kept within the screen and above a minimum size.
+            var sw = 0; var sh = 0
+            grip.setOnTouchListener { _, e ->
+                when (e.actionMasked) {
+                    MotionEvent.ACTION_DOWN -> { gx = e.rawX; gy = e.rawY; sw = lp.width; sh = lp.height }
+                    MotionEvent.ACTION_MOVE -> {
+                        lp.width = (sw + e.rawX - gx).toInt().coerceIn(minW + margin * 2, screenW - lp.x + margin)
+                        lp.height = (sh + e.rawY - gy).toInt().coerceIn(minH + margin * 2, screenH - lp.y + margin)
+                        runCatching { wm.updateViewLayout(p, lp) }
+                    }
+                    MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> savePanel()
+                }
+                true
+            }
+
+            if (genieOpen) {
+                // Grow out of the bar: snapshot the laid-out card, play the genie backwards, then reveal it.
+                afterFirstLayout(p) {
+                    Perf.mark("laid out")
+                    val bmp = capture(p)
+                    Perf.mark("snapshot")
+                    val loc = IntArray(2); p.getLocationOnScreen(loc)
+                    if (blurPx > 0) animateBlur(p, lp, 0, blurPx, genieMs(420))
+                    runGenie(bmp, loc[0], loc[1], opening = true, live = p,
+                        cardAlpha = Appearance.opacity(this) / 100f) {
+                        if (panel === p) {                // not if it was closed while growing
+                            raiseBar()
+                            if (typing) { askKeyboard(); Perf.mark("keyboard asked") }
+                        }
+                    }
+                }
+            } else if (style == "slide" && !reduced) {
+                // Slide in from the same edge the bar sits on.
+                val off = (panelW + margin * 2).toFloat() * (if (onRight) 1 else -1)
+                p.translationX = off; p.alpha = 0f
+                Motion.spring(p, DynamicAnimation.TRANSLATION_X, 0f, 1f, 0.38f)
+                Motion.spring(p, DynamicAnimation.ALPHA, 1f, 1f, 0.25f)
+            }
+            if (typing) {
+                ed.bodyEdit.requestFocus()
+                if (!genieOpen) main.postDelayed({ askKeyboard() }, 120)
+            }
+            Perf.mark("open done (main thread free)")
         }
     }
 
@@ -975,6 +1043,7 @@ class OverlayService : Service() {
         removeDismissCatcher()
         Sync.onChangedCard = null
         editor?.commit()
+        Perf.mark("saved")
         editor = null
         (getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager)
             .hideSoftInputFromWindow(p.windowToken, 0)
@@ -999,12 +1068,14 @@ class OverlayService : Service() {
         fun done() {
             applySideFromPrefs()
             scheduleTuck()
+            schedulePrepare(150)
         }
         val style = animStyle()
         when {
             reduced || style == "none" -> { removePanel(); done() }
             style == "genie" -> {
                 val bmp = capture(p)
+                Perf.mark("snapshot")
                 val loc = IntArray(2); p.getLocationOnScreen(loc)
                 runGenie(bmp, loc[0], loc[1], opening = false, live = p,
                     cardAlpha = Appearance.opacity(this) / 100f) {
@@ -1067,14 +1138,20 @@ class OverlayService : Service() {
     /** Eases the window's blur radius so it never pops on or off. */
     private fun animateBlur(view: View, lp: WindowManager.LayoutParams, from: Int, to: Int, ms: Long, onEnd: (() -> Unit)? = null) {
         if (Build.VERSION.SDK_INT < 31) { onEnd?.invoke(); return }
+        var updates = 0; var spent = 0L; var worst = 0L
         ValueAnimator.ofInt(from, to).apply {
             duration = ms
             addUpdateListener {
+                val t = System.nanoTime()
                 lp.blurBehindRadius = it.animatedValue as Int
                 runCatching { wm.updateViewLayout(view, lp) }
+                val d = System.nanoTime() - t; updates++; spent += d; worst = maxOf(worst, d)
             }
             addListener(object : AnimatorListenerAdapter() {
-                override fun onAnimationEnd(animation: Animator) { onEnd?.invoke() }
+                override fun onAnimationEnd(animation: Animator) {
+                    android.util.Log.i("ScratchyPerf", "blur $from->$to: $updates updates, ${spent / 1_000_000} ms on the main thread, worst ${worst / 1_000_000} ms")
+                    onEnd?.invoke()
+                }
             })
             start()
         }
@@ -1088,13 +1165,13 @@ class OverlayService : Service() {
         return b
     }
 
-    private fun whenSized(v: View, block: () -> Unit) {
-        if (v.width > 0 && v.isLaidOut) { block(); return }
-        v.addOnLayoutChangeListener(object : View.OnLayoutChangeListener {
-            override fun onLayoutChange(
-                view: View, l: Int, t: Int, r: Int, b: Int, ol: Int, ot: Int, or2: Int, ob: Int,
-            ) {
-                if (view.width > 0) { view.removeOnLayoutChangeListener(this); block() }
+    /** Runs once the view is in its window and laid out there, just before its first frame. */
+    private fun afterFirstLayout(v: View, block: () -> Unit) {
+        v.viewTreeObserver.addOnPreDrawListener(object : android.view.ViewTreeObserver.OnPreDrawListener {
+            override fun onPreDraw(): Boolean {
+                v.viewTreeObserver.removeOnPreDrawListener(this)
+                block()
+                return true
             }
         })
     }
@@ -1124,6 +1201,9 @@ class OverlayService : Service() {
         ).apply { gravity = Gravity.TOP or Gravity.LEFT }
         wm.addView(gv, glp)
         genieViews.add(gv)
+        Perf.mark("genie window added")
+        var frames = 0; var lastFrame = 0L; var worstGap = 0L
+        val genieStart = android.os.SystemClock.uptimeMillis()
 
         // Crossfade between the snapshot and the live card (see GenieView.snapshotShare). The live
         // card's visibility is eased so it is nearly complete early; the snapshot's share only drops
@@ -1159,11 +1239,17 @@ class OverlayService : Service() {
             duration = genieMs(if (opening) 420 else 480)
             interpolator = if (opening) DecelerateInterpolator(1.3f) else AccelerateDecelerateInterpolator()
             addUpdateListener {
+                frames++
+                val now = System.nanoTime()
+                if (lastFrame > 0) worstGap = maxOf(worstGap, now - lastFrame)
+                lastFrame = now
                 val a = it.animatedValue as Float
                 gv.t = if (opening) 1f - a else a
             }
             addListener(object : AnimatorListenerAdapter() {
                 override fun onAnimationEnd(animation: Animator) {
+                    val ms = android.os.SystemClock.uptimeMillis() - genieStart
+                    Perf.mark("genie end: $frames frames in $ms ms (${frames * 1000 / ms.coerceAtLeast(1)} fps), longest frame ${worstGap / 1_000_000} ms")
                     onEnd()
                     if (opening) crossfade(true, 260) { live.alpha = 1f; main.postDelayed({ removeSnapshot() }, 16) }
                     else main.postDelayed({ removeSnapshot() }, 16)
@@ -1197,5 +1283,18 @@ class OverlayService : Service() {
         private const val CHANNEL = "scratchy_overlay"
         private const val GREEN = 0xFF34C759.toInt()
         @Volatile var running = false
+    }
+}
+
+/** Temporary: timings of the card's open and close steps, no note content. */
+internal object Perf {
+    private var t0 = 0L
+    private var last = 0L
+    private var what = ""
+    fun start(w: String) { what = w; t0 = android.os.SystemClock.uptimeMillis(); last = t0 }
+    fun mark(step: String) {
+        val now = android.os.SystemClock.uptimeMillis()
+        android.util.Log.i("ScratchyPerf", "$what  +${now - last} ms  (${now - t0} ms total)  $step")
+        last = now
     }
 }

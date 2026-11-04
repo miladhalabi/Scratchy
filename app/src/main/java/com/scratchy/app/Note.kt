@@ -52,19 +52,30 @@ object NoteStore {
         return Note(UUID.randomUUID().toString(), "", "", now, now)
     }
 
+    // The notes as last read or written, so opening the card or redrawing the list doesn't re-read and
+    // re-decrypt the file. Only this object writes the file; the stamp still catches anything else.
+    private var cache: List<Note>? = null
+    private var cacheStamp = ""
+    private fun stamp(f: File) = "${f.lastModified()}:${f.length()}"
+    private val order = compareByDescending<Note> { it.pinned }.thenByDescending { it.updatedAt }
+
     @Synchronized
     fun all(ctx: Context): List<Note> {
         migrate(ctx)
         val f = file(ctx)
         if (!f.exists()) return emptyList()
+        val st = stamp(f)
+        cache?.let { if (st == cacheStamp) return it }
+        var unreadable = false
         val arr = runCatching { JSONArray(f.readText()) }.getOrDefault(JSONArray())
-        return (0 until arr.length()).map { i ->
+        val notes = (0 until arr.length()).map { i ->
             val o = arr.getJSONObject(i)
             val secret = o.optBoolean("secret")
             var title = o.optString("title"); var body = o.optString("body")
             if (secret) {   // secret text is stored encrypted
                 val text = Vault.decrypt(o.optString("enc"))?.let { runCatching { JSONObject(it) }.getOrNull() }
                 title = text?.optString("title") ?: ""; body = text?.optString("body") ?: "(unreadable)"
+                if (text == null) unreadable = true
             }
             Note(
                 o.getString("id"), title, Markdown.legacy(body),
@@ -73,7 +84,10 @@ object NoteStore {
                     ?: emptyList(),
                 secret, o.optLong("rev"), if (secret) "" else o.optString("category")
             )
-        }.sortedWith(compareByDescending<Note> { it.pinned }.thenByDescending { it.updatedAt })
+        }.sortedWith(order)
+        // A secret note the Keystore couldn't open yet is read again next time instead of staying "(unreadable)".
+        if (unreadable) cache = null else { cache = notes; cacheStamp = st }
+        return notes
     }
 
     fun get(ctx: Context, id: String) = all(ctx).firstOrNull { it.id == id }
@@ -190,7 +204,11 @@ object NoteStore {
         }
         val tmp = File(ctx.filesDir, "notes.json.tmp")
         tmp.writeText(arr.toString())
-        tmp.renameTo(file(ctx))
+        val f = file(ctx)
+        if (tmp.renameTo(f)) {
+            cache = notes.map { it.copy(body = Markdown.legacy(it.body), category = if (it.secret) "" else it.category) }
+                .sortedWith(order); cacheStamp = stamp(f)
+        } else cache = null
     }
 
     /** One-time import of the spike's ideas.txt (one line per idea). */
