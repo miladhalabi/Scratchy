@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import { invoke } from "@tauri-apps/api/core";
   import { canonical, canonicalCategory, cleanCategory, CATEGORY_MAX, type Note } from "@scratchy/core";
   import RichEditor from "../lib/editor/RichEditor.svelte";
   import Icon from "../lib/Icon.svelte";
@@ -171,6 +172,11 @@
     } catch { say("Couldn't read the clipboard"); }
   }
 
+  async function attachLatest() {
+    const s = await invoke<{ mime: string; b64: string } | null>("latest_screenshot").catch(() => null);
+    if (s) addImages([clipBlob(s)]); else say("No screenshots in the screenshot folder yet");
+  }
+
   function load(n: Note) {
     base = { ...n };
     title = n.title; pinned = n.pinned; category = n.category; secret = n.secret; images = [...n.images];
@@ -252,7 +258,8 @@
     <span class="grow"></span>
     <button class="icon" onclick={formatWithAi} title="Format with AI" aria-label="Format with AI"><FormatIcon kind="ai" tint="var(--accent)" /></button>
     <button class="icon accent" class:on={panel} onclick={() => (panel = !panel)} title="Format" aria-label="Format" aria-pressed={panel}><Icon name="format" size={26} /></button>
-    <button class="icon" onclick={pasteButton} title="Paste" aria-label="Paste"><Icon name="paste" size={26} /></button>
+    <button class="icon" onmousedown={(e) => e.preventDefault()} onclick={pasteButton} title="Paste" aria-label="Paste"><Icon name="paste" size={26} /></button>
+    <button class="icon" onclick={attachLatest} title="Attach latest screenshot" aria-label="Attach latest screenshot"><Icon name="screenshot" size={26} /></button>
     <button class="icon" class:accent={secret} onclick={toggleSecret} title="Secret note" aria-label="Secret note" aria-pressed={secret}><Icon name="lock" size={26} /></button>
     <button class="icon" class:accent={pinned} onclick={togglePin} title={pinned ? "Unpin" : "Pin"} aria-label="Pin" aria-pressed={pinned}><Icon name="pin" size={26} /></button>
     <button class="icon" onclick={confirmDelete} title="Delete" aria-label="Delete"><Icon name="delete" size={26} /></button>

@@ -9,7 +9,7 @@ import { LocalStore } from "./localStore";
 import * as sync from "./sync";
 import { checkVaultPassword, loadDataKey, loadVault, setVaultPassword, vaultSetUp } from "./vault";
 import { invoke } from "@tauri-apps/api/core";
-import { loadSettings } from "./settings";
+import { loadSettings, watchSettings } from "./settings";
 
 export const store = new LocalStore();
 
@@ -59,4 +59,7 @@ export async function startEngine() {
   push();          // a notes window that asked before the engine was ready gets its notes now
   // Start at login is on unless it was turned off; the entry is (re)written so it points at this copy of the app.
   if ((await loadSettings()).startAtLogin) invoke("autostart_set", { on: true }).catch(() => {});
+  // The screenshot folder in Settings, for the watcher on the Rust side.
+  let dir: string | null = null;
+  watchSettings((st) => { if (st.shotDir !== dir) { dir = st.shotDir; invoke("shots_dir", { dir }).catch(() => {}); } });
 }

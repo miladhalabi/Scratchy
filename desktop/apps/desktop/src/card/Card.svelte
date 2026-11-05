@@ -10,7 +10,8 @@
   import AiTitles from "../lib/AiTitles.svelte";
   import NoteImages from "../lib/NoteImages.svelte";
   import ImageViewer from "../lib/ImageViewer.svelte";
-  import { imageFiles, importImage } from "../lib/attach";
+  import { clipBlob, imageFiles, importImage, readClipboard } from "../lib/attach";
+  import { settings } from "../lib/settings";
   import { cardHeading } from "../lib/preview";
   import { formatWhen } from "../main/when";
   import "../lib/base.css";
@@ -100,6 +101,7 @@
   // ---- images ----
 
   let viewing: string | null = $state(null);
+  let titleEl: HTMLInputElement;
   async function setImages(images: string[]) {
     clearTimeout(saveTimer);
     if (!note) return;
@@ -115,6 +117,90 @@
       catch { aiSay("Couldn't add that image"); }
     }
   }
+  /** The Paste button: a clipboard image is attached, text goes in where you are typing. */
+  async function pasteButton() {
+    recents = null; chooser = null;
+    const inTitle = document.activeElement === titleEl;
+    try {
+      const c = await readClipboard();
+      if (c.kind === "image") addImages([clipBlob(c)]);
+      else if (c.kind === "text" && c.text) {
+        if (inTitle) {
+          const a = titleEl.selectionStart ?? title.length, b = titleEl.selectionEnd ?? a, one = c.text.replace(/\s*\n\s*/g, " ");
+          title = title.slice(0, a) + one + title.slice(b);
+          requestAnimationFrame(() => { titleEl.focus(); titleEl.setSelectionRange(a + one.length, a + one.length); });
+          typed();
+        } else editor.paste(c.text);
+      } else aiSay(c.kind === "empty" ? "Clipboard is empty" : "Nothing to paste");
+    } catch { aiSay("Couldn't read the clipboard"); }
+  }
+  async function attachLatest() {
+    recents = null; chooser = null;
+    const s = await invoke<{ mime: string; b64: string } | null>("latest_screenshot").catch(() => null);
+    if (s) addImages([clipBlob(s)]); else aiSay("No screenshots in the screenshot folder yet");
+  }
+
+  // ---- a new screenshot: asked where it goes, or attached at once ----
+
+  /** Waiting to be attached (the tray icon is green meanwhile); forgotten after the time in Settings. */
+  let shotWaiting = false;
+  let forgetTimer: ReturnType<typeof setTimeout> | undefined;
+  /** The chooser ("Add this screenshot to…"), with its preview. */
+  let chooser: { preview: string; current: Note | null } | null = $state(null);
+  let attachAfterPick = false;
+
+  function forgetShot() {
+    clearTimeout(forgetTimer);
+    shotWaiting = false; chooser = null; attachAfterPick = false;
+    invoke("shot_clear").catch(() => {});
+  }
+  function armForget() {
+    clearTimeout(forgetTimer);
+    forgetTimer = setTimeout(() => { if (chooser) forgetTimer = setTimeout(armForget, 10_000); else forgetShot(); },
+      Math.min(3600, Math.max(5, settings().shotTtl)) * 1000);
+  }
+  async function attachShot() {
+    clearTimeout(forgetTimer);
+    shotWaiting = false; chooser = null; attachAfterPick = false;
+    const s = await invoke<{ mime: string; b64: string } | null>("shot_take").catch(() => null);
+    if (s) await addImages([clipBlob(s)]);
+  }
+  /** The note "Current note" means: the one in the card if it has anything in it, else the last one used. */
+  function currentForShot(): Note | null {
+    if (note && (note.title || note.body || note.images.length || title || editor.markdown())) return note;
+    const last = prefs?.lastCardNote ? store.get(prefs.lastCardNote) : undefined;
+    return last && !last.secret ? last : null;
+  }
+  async function showChooser() {
+    recents = null;
+    chooser = { preview: "", current: currentForShot() };
+    const s = await invoke<{ mime: string; b64: string } | null>("shot_peek").catch(() => null);
+    if (!s) { forgetShot(); return; }
+    if (chooser) chooser = { ...chooser, preview: `data:${s.mime};base64,${s.b64}` };
+  }
+  /** Settles a waiting screenshot as the card opens or while it is open. */
+  function offerShot() {
+    if (!shotWaiting) return;
+    const mode = settings().shotMode;
+    if (mode === "off") forgetShot();
+    else if (mode === "auto") void attachShot();
+    else void showChooser();
+  }
+  function chooseCurrent() {
+    const cur = chooser?.current;
+    if (cur && cur.id !== note?.id) show(cur);
+    void attachShot();
+  }
+  function chooseNew() { show(null); continuing = null; void attachShot(); }
+  function chooseOther() {
+    chooser = null; attachAfterPick = true;
+    recents = store.all().filter((n) => !n.secret).sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 10);
+  }
+  function pickRecent(n: Note | null) {
+    show(n);
+    if (attachAfterPick) void attachShot();
+  }
+
   function pasted(e: ClipboardEvent) {
     const imgs = imageFiles(e.clipboardData?.files);
     if (!imgs.length) return;
@@ -154,10 +240,12 @@
     editor.focus(true);
   }
   function toggleRecents() {
+    chooser = null;
+    if (recents) attachAfterPick = false;
     recents = recents ? null : store.all().filter((n) => !n.secret).sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 10);
   }
   function checklist() {
-    recents = null;
+    recents = null; chooser = null;
     const ed = editor.instance();
     if (ed) setLines(ed, "task");
   }
@@ -203,7 +291,7 @@
     const r = { x, y, w, h };
     const { edge, tx, ty } = nearestEdge(r, sw, sh);
     const key = [title, editor.markdown(), Math.round(w), Math.round(h), colors.floating, colors.text, pinned, edge === "left" || edge === "right",
-      continuing?.id ?? "", continuing?.updatedAt ?? 0, recents ? "r" : "", note?.images.join(",") ?? "", viewing ?? ""].join("|");
+      continuing?.id ?? "", continuing?.updatedAt ?? 0, recents ? "r" : "", note?.images.join(",") ?? "", viewing ?? "", chooser ? `c${chooser.preview.length}` : ""].join("|");
     if (genie && genie.key === key) { genie.retarget(r, edge, tx, ty); return genie; }
     genie?.clear();
     genie = new Genie(root, r, edge, tx, ty);
@@ -222,7 +310,7 @@
     const fromT = reverse && anim ? anim.t() : 1;
     anim?.cancel();
     phase = "opening";
-    if (!reverse) { pick(); flushSync(); fit(); place(); }
+    if (!reverse) { pick(); if (shotWaiting) offerShot(); flushSync(); fit(); place(); }
     syncIfStale();
     void refreshAccent();
     invoke("card_keyboard", { exclusive: !pinned }).catch(() => {});
@@ -414,6 +502,11 @@
       pick(); flushSync(); fit(); place();
       if (prefs.anim === "genie") stripsFor().hide();
       off = await listen("card-toggle", toggle);
+      await listen("shot", () => {
+        if (settings().shotMode === "off") { forgetShot(); return; }
+        shotWaiting = true; armForget();
+        if (phase === "open" || phase === "opening") offerShot();     // otherwise when the card next opens
+      });
       // Settings changed one of the card's own options (opens on, animation, speed).
       await listen<Partial<CardState>>("card-prefs", ({ payload }) => {
         Object.assign(prefs, payload);
@@ -435,6 +528,8 @@
     <div class="head" onpointerdown={dragStart} onpointermove={dragMove} onpointerup={dragEnd} onpointercancel={dragEnd}>
       <button class="icon" class:on={!!recents} title="Recent notes" aria-label="Recent notes" onclick={toggleRecents}><Icon name="list" size={18} /></button>
       <button class="icon" title="Checklist" aria-label="Checklist" onclick={checklist}><Icon name="checklist" size={18} /></button>
+      <button class="icon" title="Paste" aria-label="Paste" onmousedown={(e) => e.preventDefault()} onclick={pasteButton}><Icon name="paste" size={18} /></button>
+      <button class="icon" title="Attach latest screenshot" aria-label="Attach latest screenshot" onclick={attachLatest}><Icon name="screenshot" size={18} /></button>
       <span class="handle" aria-hidden="true"><i></i></span>
       <button class="icon" class:pinned title={pinned ? "Unpin" : "Pin card: keep it on screen and use the computer normally"} onclick={togglePin} aria-pressed={pinned}><Icon name="pin" size={18} /></button>
     </div>
@@ -445,9 +540,9 @@
       </div>
     {/if}
     <div class="content">
-      <div class="ed" class:gone={!!recents}>
+      <div class="ed" class:gone={!!recents || !!chooser}>
         <div class="titlerow">
-          <input class="title" placeholder="Title" bind:value={title} oninput={typed} dir="auto" spellcheck="false"
+          <input class="title" bind:this={titleEl} placeholder="Title" bind:value={title} oninput={typed} dir="auto" spellcheck="false"
             onkeydown={(e) => { if (e.key === "Enter") { e.preventDefault(); editor.focus(); } }} />
           <button class="icon sparkle" title="Suggest a title" aria-label="Suggest a title"
             onclick={() => titles?.suggest(editor.markdown(), note?.images[0], !!note?.secret)}><Icon name="sparkle" size={18} /></button>
@@ -460,11 +555,27 @@
           <RichEditor bind:this={editor} class="body" placeholder="Start typing…" onchange={typed} />
         </div>
       </div>
+      {#if chooser}
+        <div class="chooser scroll">
+          <div class="ask">
+            {#if chooser.preview}<img src={chooser.preview} alt="The new screenshot" />{:else}<span class="ph"></span>{/if}
+            <b>Add this screenshot to…</b>
+          </div>
+          {#if chooser.current}
+            <button class="choice filled" onclick={chooseCurrent}>
+              <b>Current note</b><small dir="auto">{chooser.current.secret ? "Secret note" : cardHeading(chooser.current) || "Untitled"}</small>
+            </button>
+          {/if}
+          <button class="choice" onclick={chooseNew}><b>New note</b><small>Start a fresh note with it</small></button>
+          <button class="choice" onclick={chooseOther}><b>Other note…</b><small>Pick one from your notes</small></button>
+          <button class="notnow" onclick={forgetShot}>Not now</button>
+        </div>
+      {/if}
       {#if recents}
         <div class="recents scroll">
-          <button class="new" onclick={() => show(null)}>＋  New note</button>
+          <button class="new" onclick={() => pickRecent(null)}>＋  New note</button>
           {#each recents as n (n.id)}
-            <button onclick={() => show(n)} dir="auto">{n.pinned ? "📌 " : ""}{cardHeading(n)}</button>
+            <button onclick={() => pickRecent(n)} dir="auto">{n.pinned ? "📌 " : ""}{cardHeading(n)}</button>
           {/each}
         </div>
       {/if}
@@ -532,6 +643,21 @@
   .card :global(.body) { flex: 1 0 auto; }
   .card :global(.body .rich) { overflow: visible; }
   .card :global(.body .rich) { padding: 8px 4px; font-size: 15px; }
+  .chooser { position: absolute; inset: 0; overflow-y: auto; display: flex; flex-direction: column; padding: 4px 4px 6px; scrollbar-width: none; }
+  .ask { flex: none; display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
+  .ask img, .ask .ph { flex: none; width: 44px; height: 56px; border-radius: 10px; object-fit: cover; background: var(--hairline); }
+  .ask b { font-size: 15px; font-weight: 500; }
+  .choice {
+    flex: none; height: 64px; margin-bottom: 8px; padding: 0 16px; border: 0; border-radius: 16px; display: flex; flex-direction: column;
+    justify-content: center; align-items: flex-start; background: var(--hairline); color: var(--text); font: inherit; cursor: pointer;
+    text-align: start; transition: transform 150ms;
+  }
+  .choice:active { transform: scale(0.97); }
+  .choice b { font-size: 17px; font-weight: 500; }
+  .choice small { font-size: 12px; color: var(--secondary); max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; unicode-bidi: plaintext; }
+  .choice.filled { background: var(--accent); color: var(--on-accent); }
+  .choice.filled small { color: color-mix(in srgb, var(--on-accent) 80%, transparent); }
+  .notnow { flex: none; border: 0; background: transparent; color: var(--secondary); font: inherit; font-size: 13px; padding: 10px 0 6px; cursor: pointer; }
   .recents { position: absolute; inset: 0; overflow-y: auto; display: flex; flex-direction: column; scrollbar-width: none; }
   .recents button {
     flex: none; border: 0; background: transparent; padding: 11px 6px; color: var(--text); font: inherit; font-size: 15px; text-align: start;

@@ -9,6 +9,8 @@ use std::{
 };
 mod overlay;
 mod remote;
+mod shots;
+mod tray;
 use tauri::{AppHandle, Manager, State};
 
 /// Only plain file names: no folders, no "..", nothing hidden.
@@ -356,11 +358,14 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             read_text, write_text, remove_text, read_attachment, write_attachment, has_attachment, data_path, system_accent, toggle_path, autostart_get, autostart_set,
             google_client, oauth_start, oauth_wait, open_url, secret_get, secret_set, secret_delete,
-            card_hide, card_input, card_keyboard, card_boot, show_main, clipboard_read, log
+            card_hide, card_input, card_keyboard, card_boot, show_main, clipboard_read,
+            shots::shot_peek, shots::shot_take, shots::shot_clear, shots::shots_dir, shots::latest_screenshot, log
         ])
         .setup(move |app| {
             let h = app.handle().clone();
             overlay::setup(&h);
+            if let Err(e) = tray::start(&h) { eprintln!("no tray icon: {e}"); }
+            shots::start(&h);
             if !toggle && !background { open_main(&h); }
             remote::listen(h);
             Ok(())
