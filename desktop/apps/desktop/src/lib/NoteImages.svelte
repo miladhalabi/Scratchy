@@ -6,12 +6,12 @@
    * A note's images, each a rounded block in the note's flow above the text, kept in proportion inside a modest
    * box (renderImages in NoteEditor.kt): 280×220, or 200×140 in the card. A click opens it; × takes it out of the note.
    */
-  interface Props { images: string[]; compact?: boolean; onopen: (name: string) => void; onremove: (name: string) => void }
-  let { images, compact = false, onopen, onremove }: Props = $props();
+  interface Props { images: string[]; compact?: boolean; zoom?: number; onopen: (name: string) => void; onremove: (name: string) => void }
+  let { images, compact = false, zoom = 1, onopen, onremove }: Props = $props();
 </script>
 
 {#if images.length}
-  <div class="images" class:compact>
+  <div class="images" class:compact style:--iz={zoom}>
     {#each images as name (name)}
       <div class="cell">
         {#await imageUrl(name)}
@@ -33,8 +33,8 @@
   .images { flex: none; display: flex; flex-direction: column; align-items: flex-start; padding: 0 0 0 4px; }
   .cell { position: relative; margin: 8px 0 6px; }
   .open { display: block; padding: 0; border: 0; background: transparent; cursor: zoom-in; border-radius: 14px; overflow: hidden; }
-  img { display: block; max-width: min(280px, 100%); max-height: 220px; border-radius: 14px; background: var(--hairline); }
-  .compact img { max-width: min(200px, 100%); max-height: 140px; }
+  img { display: block; max-width: min(calc(280px * var(--iz)), 100%); max-height: calc(220px * var(--iz)); border-radius: 14px; background: var(--hairline); }
+  .compact img { max-width: min(calc(200px * var(--iz)), 100%); max-height: calc(140px * var(--iz)); }
   .wait { display: block; width: 110px; height: 110px; border-radius: 14px; background: var(--hairline); }
   .remove {
     position: absolute; top: 6px; right: 6px; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 12px;

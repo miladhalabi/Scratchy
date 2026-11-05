@@ -13,6 +13,9 @@
   import Thumb from "./Thumb.svelte";
   import { formatWhen } from "./when";
   import { aiConfigured, categorize } from "../lib/ai";
+  import { invoke } from "@tauri-apps/api/core";
+  import { saveSettings, settings as appSettings, watchSettings } from "../lib/settings";
+  import { stepZoom, zoomBadge, zoomKey, zoomWheel } from "../lib/zoom";
   import "../lib/base.css";
   import "../lib/editor/editor.css";
 
@@ -193,9 +196,28 @@
   onMount(() => {
     const off = notes.watch((s) => { all = s.notes; sync = s.sync; vaultSetUp = s.vault.setUp; ready = true; });
     const offNotice = notes.onNotice(say);
+    // Zoom: Ctrl+= / Ctrl+- / Ctrl+0 or Ctrl+scroll, anywhere in the window (the note and Settings too).
+    let zoom = 0;
+    const offZoom = watchSettings((st) => {
+      if (st.zoom === zoom) return;
+      const first = zoom === 0;
+      zoom = st.zoom;
+      invoke("set_zoom", { factor: zoom }).catch(() => {});
+      if (!first) zoomBadge(document.body, zoom);
+    });
+    const zoomTo = (dir: 1 | -1 | 0) => { const z = stepZoom(appSettings().zoom, dir); if (z !== appSettings().zoom) saveSettings({ zoom: z }); else zoomBadge(document.body, z); };
+    const zoomKeys = (e: KeyboardEvent) => { const d = zoomKey(e); if (d !== null) { e.preventDefault(); e.stopPropagation(); zoomTo(d); } };
+    const zoomWheels = (e: WheelEvent) => { const d = zoomWheel(e); if (d !== null) zoomTo(d); };
+    window.addEventListener("keydown", zoomKeys, true);
+    window.addEventListener("wheel", zoomWheels, { capture: true, passive: false });
     const checkKey = () => aiConfigured().then((v) => (keyed = v));
     checkKey(); window.addEventListener("focus", checkKey);
-    return () => { off.then((f) => f()); offNotice.then((f) => f()); window.removeEventListener("focus", checkKey); };
+    return () => {
+      off.then((f) => f()); offNotice.then((f) => f()); offZoom.then((f) => f());
+      window.removeEventListener("focus", checkKey);
+      window.removeEventListener("keydown", zoomKeys, true);
+      window.removeEventListener("wheel", zoomWheels, true);
+    };
   });
 </script>
 

@@ -13,9 +13,11 @@ export interface CardState extends CardPrefs {
   anim: Anim;
   /** Genie speed, 50–200 %. */
   speed: number;
+  /** The size of the card's text and images (1 = 100%); the card itself keeps its size. */
+  zoom: number;
 }
 
-const defaults: CardState = { mode: "recent", w: 400, h: 460, pinned: false, anim: "genie", speed: 100 };
+const defaults: CardState = { mode: "recent", w: 400, h: 460, pinned: false, anim: "genie", speed: 100, zoom: 1 };
 
 export async function loadCard(): Promise<CardState> {
   const t = await files.readText("card.json").catch(() => null);

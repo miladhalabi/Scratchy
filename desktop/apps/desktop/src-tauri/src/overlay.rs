@@ -16,6 +16,8 @@ use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindow, WebviewWindo
 static SHOWN: AtomicBool = AtomicBool::new(false);
 /// `scratchy --toggle` started the app: open the card as soon as the page is ready.
 pub static OPEN_ON_BOOT: AtomicBool = AtomicBool::new(false);
+/// The surface is shown once right after startup, invisibly, so the first real open doesn't pay for setting it up.
+static WARMING: AtomicBool = AtomicBool::new(false);
 
 fn builder<'a>(app: &'a AppHandle) -> WebviewWindowBuilder<'a, tauri::Wry, AppHandle> {
     WebviewWindowBuilder::new(app, "card", WebviewUrl::App("index.html?w=card".into()))
@@ -61,6 +63,16 @@ mod imp {
         }
     }
 
+    /// Shown with nothing to click and no keyboard: the apps underneath don't notice it.
+    pub fn show_quietly(win: &WebviewWindow) {
+        if let Ok(g) = win.gtk_window() {
+            g.set_keyboard_mode(KeyboardMode::None);
+            let empty = gtk::cairo::Region::create();
+            g.input_shape_combine_region(Some(&empty));
+            g.show_all();
+        }
+    }
+
     /// Exclusive: typing goes to the card the moment it opens. On demand: only after a click (pinned).
     pub fn keyboard(win: &WebviewWindow, exclusive: bool) {
         if let Ok(g) = win.gtk_window() {
@@ -78,6 +90,7 @@ mod imp {
         builder(app).always_on_top(true).maximized(true).build().expect("card window")
     }
     pub fn show(win: &WebviewWindow) { let _ = win.show(); let _ = win.set_focus(); }
+    pub fn show_quietly(_win: &WebviewWindow) {}
     pub fn hide(win: &WebviewWindow) { let _ = win.hide(); }
     pub fn input(_win: &WebviewWindow, _rect: Option<(i32, i32, i32, i32)>) {}
     pub fn keyboard(_win: &WebviewWindow, _exclusive: bool) {}
@@ -96,9 +109,38 @@ fn on_main(app: &AppHandle, f: impl FnOnce(&AppHandle) + Send + 'static) {
 pub fn toggle(app: &AppHandle) {
     on_main(app, |app| {
         if let Some(c) = card(app) {
+            if WARMING.swap(false, Ordering::SeqCst) {
+                // Opened during the warm-up: it is already mapped, so give it back its input and keyboard.
+                SHOWN.store(true, Ordering::SeqCst);
+                imp::input(&c, None);
+                imp::keyboard(&c, true);
+            }
             if !SHOWN.swap(true, Ordering::SeqCst) { imp::show(&c); }
             let _ = c.emit("card-toggle", ());
         }
+    });
+}
+
+/// Right after the page is ready: map the surface for a moment with nothing on it, then unmap it.
+pub fn warm_up(app: &AppHandle) {
+    if !cfg!(target_os = "linux") { return }
+    on_main(app, |app| {
+        let Some(c) = card(app) else { return };
+        if SHOWN.load(Ordering::SeqCst) { return }
+        WARMING.store(true, Ordering::SeqCst);
+        imp::show_quietly(&c);
+    });
+    let a = app.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(600));
+        on_main(&a, |app| {
+            if !WARMING.swap(false, Ordering::SeqCst) { return }   // the card was opened meanwhile
+            if let Some(c) = card(app) {
+                imp::hide(&c);
+                imp::input(&c, None);
+                imp::keyboard(&c, true);
+            }
+        });
     });
 }
 

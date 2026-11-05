@@ -324,7 +324,7 @@
   .editor { flex: 1; min-height: 0; display: flex; flex-direction: column; width: 100%; max-width: 820px; margin: 0 auto; padding: 0 16px; box-sizing: border-box; }
   .title {
     flex: none; resize: none; overflow: hidden; border: 0; outline: 0; background: transparent; color: var(--text); font: inherit;
-    font-size: 26px; font-weight: 700; letter-spacing: -0.02em; line-height: 1.25; padding: 8px 4px 4px; max-height: calc(3 * 1.25em + 12px);
+    font-size: 26px; font-weight: 700; letter-spacing: -0.02em; line-height: 1.25; padding: 8px 4px 10px; max-height: calc(3 * 1.25em + 18px);
     unicode-bidi: plaintext; text-align: start;
   }
   .title::placeholder { color: var(--secondary); }

@@ -5,3 +5,12 @@
 }
 html, body { font-family: var(--font); -webkit-font-smoothing: antialiased; }
 input, button, textarea { font-family: inherit; }
+
+/* The zoom level, shown for a moment after it changes. */
+.zoom-badge {
+  position: absolute; left: 50%; bottom: 64px; z-index: 100; transform: translateX(-50%); pointer-events: none;
+  padding: 6px 14px; border-radius: 16px; background: var(--text); color: var(--background, #fff);
+  font: 500 13px var(--font); opacity: 0; transition: opacity 160ms ease-out;
+}
+.zoom-badge.on { opacity: 0.92; transition: none; }
+.zoom-badge.out { opacity: 0; transition: opacity 400ms ease-in; }

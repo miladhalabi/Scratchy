@@ -11,6 +11,7 @@
   import { getSystemAccent } from "../lib/theme";
   import Icon from "../lib/Icon.svelte";
   import Segmented from "../lib/Segmented.svelte";
+  import { MAX_ZOOM, MIN_ZOOM, stepZoom } from "../lib/zoom";
 
   /** Settings, laid out like the phone's SettingsActivity: a menu of topics, one page each. */
   interface Props { sync: SyncStatus; vaultSetUp: boolean; onback: () => void }
@@ -198,6 +199,22 @@
           <p class="caption">System follows your desktop's accent color (your Omarchy theme, or GNOME's accent). If it doesn't look right, pick a color.</p>
         </div>
       </div>
+      <h2>Zoom</h2>
+      <div class="group">
+        <div class="row zoomrow">
+          <span class="grow">Notes window</span>
+          <button class="zb" aria-label="Zoom out" disabled={s.zoom <= MIN_ZOOM} onclick={() => set({ zoom: stepZoom(s!.zoom, -1) })}>−</button>
+          <button class="zv" title="Back to 100%" onclick={() => set({ zoom: 1 })}>{Math.round(s.zoom * 100)}%</button>
+          <button class="zb" aria-label="Zoom in" disabled={s.zoom >= MAX_ZOOM} onclick={() => set({ zoom: stepZoom(s!.zoom, 1) })}>＋</button>
+        </div>
+        <div class="row zoomrow">
+          <span class="grow">Card text</span>
+          <button class="zb" aria-label="Smaller" disabled={card.zoom <= MIN_ZOOM} onclick={() => setCard({ zoom: stepZoom(card!.zoom, -1) })}>−</button>
+          <button class="zv" title="Back to 100%" onclick={() => setCard({ zoom: 1 })}>{Math.round(card.zoom * 100)}%</button>
+          <button class="zb" aria-label="Bigger" disabled={card.zoom >= MAX_ZOOM} onclick={() => setCard({ zoom: stepZoom(card!.zoom, 1) })}>＋</button>
+        </div>
+        <p class="caption zcap">Or Ctrl+= and Ctrl+- (Ctrl+0 for 100%), or Ctrl+scroll, in the notes window and in the card.</p>
+      </div>
       <h2>Animation</h2>
       <div class="group">
         <div class="row">
@@ -380,6 +397,17 @@
   .txt small { font-size: 13px; color: var(--secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .title { margin: 0; font-size: 16px; color: var(--text); }
   .caption { margin: 4px 0 0; font-size: 13px; line-height: 1.4; color: var(--secondary); }
+  .zoomrow { flex-direction: row; align-items: center; gap: 6px; padding: 10px 0; }
+  .zoomrow .grow { flex: 1; font-size: 16px; }
+  .zb, .zv {
+    height: 36px; border: 0; border-radius: 18px; background: var(--track); color: var(--text); font: inherit; cursor: pointer;
+    transition: transform 150ms;
+  }
+  .zb { width: 36px; font-size: 18px; }
+  .zv { min-width: 64px; font-size: 14px; font-weight: 500; font-variant-numeric: tabular-nums; }
+  .zb:active, .zv:active { transform: scale(0.92); }
+  .zb:disabled { opacity: 0.35; cursor: default; }
+  .zcap { padding-bottom: 14px; }
   .seg { margin-top: 10px; }
   .dim { opacity: 0.4; }
   .slider { display: flex; font-size: 16px; } .slider span { flex: 1; } .slider b { font-weight: 500; color: var(--accent); }

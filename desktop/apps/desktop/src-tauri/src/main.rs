@@ -38,7 +38,11 @@ fn private(path: &std::path::Path, mode: u32) {
 fn private(_: &std::path::Path, _: u32) {}
 
 /// Writes through a temp file and renames, so a crash never leaves a half-written file.
+/// One write at a time: commands run off the main thread now, so two saves of one file could otherwise overlap.
+static WRITES: Mutex<()> = Mutex::new(());
+
 fn write_atomic(path: PathBuf, data: &[u8]) -> Result<(), String> {
+    let _one = WRITES.lock().unwrap_or_else(|e| e.into_inner());
     let tmp = path.with_extension("tmp");
     let mut f = fs::File::create(&tmp).map_err(|e| e.to_string())?;
     f.write_all(data).map_err(|e| e.to_string())?;
@@ -48,7 +52,7 @@ fn write_atomic(path: PathBuf, data: &[u8]) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn read_text(app: AppHandle, name: String) -> Result<Option<String>, String> {
+async fn read_text(app: AppHandle, name: String) -> Result<Option<String>, String> {
     safe(&name)?;
     match fs::read_to_string(dir(&app, None)?.join(&name)) {
         Ok(s) => Ok(Some(s)),
@@ -58,14 +62,14 @@ fn read_text(app: AppHandle, name: String) -> Result<Option<String>, String> {
 }
 
 #[tauri::command]
-fn write_text(app: AppHandle, name: String, data: String) -> Result<(), String> {
+async fn write_text(app: AppHandle, name: String, data: String) -> Result<(), String> {
     safe(&name)?;
     write_atomic(dir(&app, None)?.join(&name), data.as_bytes())
 }
 
 /// Images are stored under attachments/ and travel as base64 text.
 #[tauri::command]
-fn read_attachment(app: AppHandle, name: String) -> Result<Option<String>, String> {
+async fn read_attachment(app: AppHandle, name: String) -> Result<Option<String>, String> {
     safe(&name)?;
     match fs::read(dir(&app, Some("attachments"))?.join(&name)) {
         Ok(b) => Ok(Some(STANDARD.encode(b))),
@@ -75,20 +79,20 @@ fn read_attachment(app: AppHandle, name: String) -> Result<Option<String>, Strin
 }
 
 #[tauri::command]
-fn write_attachment(app: AppHandle, name: String, b64: String) -> Result<(), String> {
+async fn write_attachment(app: AppHandle, name: String, b64: String) -> Result<(), String> {
     safe(&name)?;
     let bytes = STANDARD.decode(b64).map_err(|e| e.to_string())?;
     write_atomic(dir(&app, Some("attachments"))?.join(&name), &bytes)
 }
 
 #[tauri::command]
-fn has_attachment(app: AppHandle, name: String) -> Result<bool, String> {
+async fn has_attachment(app: AppHandle, name: String) -> Result<bool, String> {
     safe(&name)?;
     Ok(dir(&app, Some("attachments"))?.join(&name).exists())
 }
 
 #[tauri::command]
-fn remove_text(app: AppHandle, name: String) -> Result<(), String> {
+async fn remove_text(app: AppHandle, name: String) -> Result<(), String> {
     safe(&name)?;
     match fs::remove_file(dir(&app, None)?.join(&name)) {
         Ok(()) => Ok(()),
@@ -104,7 +108,7 @@ struct GoogleClient { client_id: String, client_secret: String }
 /// The Google "Desktop app" credentials, from the environment (set by run.sh from desktop/.env.local)
 /// or baked in at build time. A desktop client secret is not confidential, but it stays out of git.
 #[tauri::command]
-fn google_client() -> Result<GoogleClient, String> {
+async fn google_client() -> Result<GoogleClient, String> {
     let get = |name: &str, built: Option<&str>| std::env::var(name).ok().or(built.map(String::from)).filter(|v| !v.is_empty());
     match (
         get("GOOGLE_CLIENT_ID", option_env!("GOOGLE_CLIENT_ID")),
@@ -162,7 +166,7 @@ async fn oauth_wait(state: State<'_, Oauth>) -> Result<String, String> {
 
 /// Opens Google's sign-in page in the default browser. Only Google sign-in addresses are allowed.
 #[tauri::command]
-fn open_url(url: String) -> Result<(), String> {
+async fn open_url(url: String) -> Result<(), String> {
     if !url.starts_with("https://accounts.google.com/") { return Err("refusing to open that address".into()); }
     #[cfg(target_os = "linux")]
     let mut c = std::process::Command::new("xdg-open");
@@ -178,7 +182,7 @@ const KEYRING_SERVICE: &str = "com.scratchy.desktop";
 /// The operating system's secret store (Secret Service on Linux, Credential Manager, Keychain).
 /// Returns Ok(None) when the secret doesn't exist yet and Err when no store is available.
 #[tauri::command]
-fn secret_get(name: String) -> Result<Option<String>, String> {
+async fn secret_get(name: String) -> Result<Option<String>, String> {
     safe(&name)?;
     let e = keyring::Entry::new(KEYRING_SERVICE, &name).map_err(|e| e.to_string())?;
     match e.get_password() {
@@ -189,14 +193,14 @@ fn secret_get(name: String) -> Result<Option<String>, String> {
 }
 
 #[tauri::command]
-fn secret_set(name: String, value: String) -> Result<(), String> {
+async fn secret_set(name: String, value: String) -> Result<(), String> {
     safe(&name)?;
     keyring::Entry::new(KEYRING_SERVICE, &name).map_err(|e| e.to_string())?
         .set_password(&value).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-fn secret_delete(name: String) -> Result<(), String> {
+async fn secret_delete(name: String) -> Result<(), String> {
     safe(&name)?;
     match keyring::Entry::new(KEYRING_SERVICE, &name).map_err(|e| e.to_string())?.delete_credential() {
         Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
@@ -207,7 +211,7 @@ fn secret_delete(name: String) -> Result<(), String> {
 /// The desktop's accent color, like the phone's wallpaper color: the Omarchy theme's accent, else GNOME's
 /// accent setting. None when the desktop has no accent of its own.
 #[tauri::command]
-fn system_accent() -> Option<String> {
+async fn system_accent() -> Option<String> {
     #[cfg(target_os = "linux")]
     {
         let home = std::env::var("HOME").ok()?;
@@ -237,7 +241,7 @@ fn system_accent() -> Option<String> {
 
 /// The small program the desktop's shortcut runs (it sits next to this one), for the line Settings shows.
 #[tauri::command]
-fn toggle_path() -> String {
+async fn toggle_path() -> String {
     let exe = std::env::current_exe().unwrap_or_default();
     exe.with_file_name(if cfg!(windows) { "scratchy-toggle.exe" } else { "scratchy-toggle" }).to_string_lossy().into_owned()
 }
@@ -251,7 +255,7 @@ fn autostart_file() -> Option<PathBuf> {
 }
 
 #[tauri::command]
-fn autostart_get() -> bool {
+async fn autostart_get() -> bool {
     #[cfg(target_os = "linux")]
     { autostart_file().is_some_and(|f| f.exists()) }
     #[cfg(not(target_os = "linux"))]
@@ -259,7 +263,7 @@ fn autostart_get() -> bool {
 }
 
 #[tauri::command]
-fn autostart_set(on: bool) -> Result<(), String> {
+async fn autostart_set(on: bool) -> Result<(), String> {
     #[cfg(target_os = "linux")]
     {
         let f = autostart_file().ok_or("no home folder")?;
@@ -280,7 +284,7 @@ fn autostart_set(on: bool) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn data_path(app: AppHandle) -> Result<String, String> {
+async fn data_path(app: AppHandle) -> Result<String, String> {
     Ok(dir(&app, None)?.to_string_lossy().into_owned())
 }
 
@@ -294,7 +298,7 @@ fn card_keyboard(app: AppHandle, exclusive: bool) { overlay::keyboard(&app, excl
 /// The page is ready: if `scratchy --toggle` started the app, the card opens now.
 #[tauri::command]
 fn card_boot(app: AppHandle) {
-    if overlay::OPEN_ON_BOOT.swap(false, std::sync::atomic::Ordering::SeqCst) { overlay::toggle(&app) }
+    if overlay::OPEN_ON_BOOT.swap(false, std::sync::atomic::Ordering::SeqCst) { overlay::toggle(&app) } else { overlay::warm_up(&app) }
 }
 
 /// The notes window: made when it is asked for and really closed when you close it (the notes engine lives in
@@ -315,7 +319,7 @@ fn show_main(app: AppHandle) { open_main(&app) }
 
 /// What the clipboard holds for the Paste button: an image (base64) if there is one, else its text.
 #[tauri::command]
-fn clipboard_read() -> Result<serde_json::Value, String> {
+async fn clipboard_read() -> Result<serde_json::Value, String> {
     use std::process::Command;
     let types = Command::new("wl-paste").arg("--list-types").output().map_err(|e| e.to_string())?;
     let types = String::from_utf8_lossy(&types.stdout).into_owned();
@@ -332,9 +336,15 @@ fn clipboard_read() -> Result<serde_json::Value, String> {
     Ok(serde_json::json!({ "kind": "text", "text": String::from_utf8_lossy(&out.stdout) }))
 }
 
+/// The notes window's zoom, the whole page like a browser's (the card zooms only its text, in the page).
+#[tauri::command]
+fn set_zoom(window: tauri::WebviewWindow, factor: f64) -> Result<(), String> {
+    window.set_zoom(factor.clamp(0.5, 2.0)).map_err(|e| e.to_string())
+}
+
 /// Errors from the pages, printed with the app's own output.
 #[tauri::command]
-fn log(line: String) { eprintln!("[page] {line}"); }
+async fn log(line: String) { eprintln!("[page] {line}"); }
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
@@ -358,7 +368,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             read_text, write_text, remove_text, read_attachment, write_attachment, has_attachment, data_path, system_accent, toggle_path, autostart_get, autostart_set,
             google_client, oauth_start, oauth_wait, open_url, secret_get, secret_set, secret_delete,
-            card_hide, card_input, card_keyboard, card_boot, show_main, clipboard_read,
+            card_hide, card_input, card_keyboard, card_boot, show_main, clipboard_read, set_zoom,
             shots::shot_peek, shots::shot_take, shots::shot_clear, shots::shots_dir, shots::latest_screenshot, log
         ])
         .setup(move |app| {

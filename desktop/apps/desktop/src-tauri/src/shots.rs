@@ -153,34 +153,34 @@ fn encode(bytes: &[u8], mime: &str) -> serde_json::Value {
 
 /// The waiting screenshot, left waiting (for the chooser's preview).
 #[tauri::command]
-pub fn shot_peek() -> Option<serde_json::Value> {
+pub async fn shot_peek() -> Option<serde_json::Value> {
     PENDING.lock().unwrap().as_ref().map(|s| encode(&s.bytes, &s.mime))
 }
 
 /// The waiting screenshot, taken: nothing waits after this.
 #[tauri::command]
-pub fn shot_take(app: AppHandle) -> Option<serde_json::Value> {
+pub async fn shot_take(app: AppHandle) -> Option<serde_json::Value> {
     let s = PENDING.lock().unwrap().take();
     crate::tray::waiting(&app, false);
     s.map(|s| encode(&s.bytes, &s.mime))
 }
 
 #[tauri::command]
-pub fn shot_clear(app: AppHandle) {
+pub async fn shot_clear(app: AppHandle) {
     *PENDING.lock().unwrap() = None;
     crate::tray::waiting(&app, false);
 }
 
 /// Sets the folder from Settings ("" for the usual one) and says which folder is watched.
 #[tauri::command]
-pub fn shots_dir(dir: String) -> String {
+pub async fn shots_dir(dir: String) -> String {
     *DIR.lock().unwrap() = dir.trim().to_string();
     self::dir().to_string_lossy().into_owned()
 }
 
 /// The newest image in the screenshot folder, for the screenshot button.
 #[tauri::command]
-pub fn latest_screenshot() -> Option<serde_json::Value> {
+pub async fn latest_screenshot() -> Option<serde_json::Value> {
     let (_, p) = images(&dir()).into_iter().next()?;
     Some(encode(&fs::read(&p).ok()?, mime_of(&p)?))
 }

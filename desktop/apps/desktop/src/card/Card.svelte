@@ -12,6 +12,7 @@
   import ImageViewer from "../lib/ImageViewer.svelte";
   import { clipBlob, imageFiles, importImage, readClipboard } from "../lib/attach";
   import { settings } from "../lib/settings";
+  import { stepZoom, zoomBadge, zoomKey, zoomWheel } from "../lib/zoom";
   import { cardHeading } from "../lib/preview";
   import { formatWhen } from "../main/when";
   import "../lib/base.css";
@@ -101,6 +102,13 @@
   // ---- images ----
 
   let viewing: string | null = $state(null);
+  /** Text and image size inside the card (Ctrl+= / Ctrl+- / Ctrl+0, Ctrl+scroll); the card keeps its size. */
+  let zoom = $state(1);
+  function zoomTo(dir: 1 | -1 | 0) {
+    zoom = stepZoom(zoom, dir);
+    if (prefs) { prefs.zoom = zoom; saveCard(prefs); }
+    zoomBadge(cardEl, zoom);
+  }
   let titleEl: HTMLInputElement;
   async function setImages(images: string[]) {
     clearTimeout(saveTimer);
@@ -291,7 +299,7 @@
     const r = { x, y, w, h };
     const { edge, tx, ty } = nearestEdge(r, sw, sh);
     const key = [title, editor.markdown(), Math.round(w), Math.round(h), colors.floating, colors.text, pinned, edge === "left" || edge === "right",
-      continuing?.id ?? "", continuing?.updatedAt ?? 0, recents ? "r" : "", note?.images.join(",") ?? "", viewing ?? "", chooser ? `c${chooser.preview.length}` : ""].join("|");
+      continuing?.id ?? "", continuing?.updatedAt ?? 0, recents ? "r" : "", note?.images.join(",") ?? "", viewing ?? "", chooser ? `c${chooser.preview.length}` : "", zoom].join("|");
     if (genie && genie.key === key) { genie.retarget(r, edge, tx, ty); return genie; }
     genie?.clear();
     genie = new Genie(root, r, edge, tx, ty);
@@ -336,6 +344,7 @@
       }, shown);
     } else if (prefs.anim === "slide") {
       cardEl.style.visibility = "visible";
+      editor.focus(true);                                  // visible from the start: typing works while it slides in
       let first = true;
       anim = runT(fromT, 0, 240 * speed() * fromT, easeOut, (t) => {
         if (first) { first = false; firstFrame(); }
@@ -357,7 +366,7 @@
     genie?.hide();
     place();
     phase = "open";
-    editor.focus(true);
+    if (!cardEl.contains(document.activeElement)) editor.focus(true);
   }
 
   function close() {
@@ -485,6 +494,8 @@
   }
 
   function keys(e: KeyboardEvent) {
+    const z = zoomKey(e);
+    if (z !== null) { e.preventDefault(); if (phase === "open") zoomTo(z); return; }
     if (e.key === "Escape") { e.preventDefault(); if (viewing) viewing = null; else close(); }
   }
 
@@ -493,6 +504,7 @@
     (async () => {
       prefs = await loadCard();
       pinned = prefs.pinned;
+      zoom = prefs.zoom;
       w = prefs.w; h = prefs.h;
       x = prefs.x ?? W() - w - 48;
       y = prefs.y ?? (H() - h) / 2;
@@ -510,19 +522,22 @@
       // Settings changed one of the card's own options (opens on, animation, speed).
       await listen<Partial<CardState>>("card-prefs", ({ payload }) => {
         Object.assign(prefs, payload);
+        if (payload.zoom) zoom = payload.zoom;
         saveCard(prefs);
         if (payload.anim && payload.anim !== "genie") { genie?.clear(); genie = null; }
       });
       invoke("card_boot").catch(() => {});
     })();
     window.addEventListener("keydown", keys);
-    return () => { off?.(); window.removeEventListener("keydown", keys); };
+    const wheel = (e: WheelEvent) => { const d = zoomWheel(e); if (d !== null && phase === "open") zoomTo(d); };
+    cardEl.addEventListener("wheel", wheel, { passive: false });
+    return () => { off?.(); window.removeEventListener("keydown", keys); cardEl.removeEventListener("wheel", wheel); };
   });
 </script>
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div class="root" bind:this={root} onpointerdown={outside}>
-  <div class="card" bind:this={cardEl} role="presentation" onpastecapture={pasted} ondrop={dropped}
+  <div class="card" bind:this={cardEl} style:--z={zoom} role="presentation" onpastecapture={pasted} ondrop={dropped}
     ondragover={(e) => { if (e.dataTransfer?.types.includes("Files")) { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; } }}>
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div class="head" onpointerdown={dragStart} onpointermove={dragMove} onpointerup={dragEnd} onpointercancel={dragEnd}>
@@ -551,7 +566,7 @@
         <AiTitles bind:this={titles} onpick={(t) => { title = t; typed(); }} onmessage={aiSay} />
         {#if aiNote}<span class="ainote">{aiNote}</span>{/if}
         <div class="flow scroll">
-          <NoteImages images={note?.images ?? []} compact onopen={(n) => (viewing = n)} onremove={(n) => note && setImages(note.images.filter((x) => x !== n))} />
+          <NoteImages images={note?.images ?? []} compact {zoom} onopen={(n) => (viewing = n)} onremove={(n) => note && setImages(note.images.filter((x) => x !== n))} />
           <RichEditor bind:this={editor} class="body" placeholder="Start typing…" onchange={typed} />
         </div>
       </div>
@@ -630,7 +645,7 @@
   .ed.gone { visibility: hidden; }
   .title {
     flex: none; border: 0; outline: 0; background: transparent; color: var(--text); font: inherit; width: 100%; box-sizing: border-box;
-    font-size: 18px; font-weight: 700; padding: 8px 4px 4px; unicode-bidi: plaintext; text-align: start;
+    font-size: calc(18px * var(--z)); font-weight: 700; padding: 8px 4px 10px; unicode-bidi: plaintext; text-align: start;
   }
   .title::placeholder { color: var(--secondary); }
   .titlerow { flex: none; display: flex; align-items: center; }
@@ -642,7 +657,7 @@
   .flow { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; scrollbar-width: none; }
   .card :global(.body) { flex: 1 0 auto; }
   .card :global(.body .rich) { overflow: visible; }
-  .card :global(.body .rich) { padding: 8px 4px; font-size: 15px; }
+  .card :global(.body .rich) { padding: 8px 4px; font-size: calc(15px * var(--z)); }
   .chooser { position: absolute; inset: 0; overflow-y: auto; display: flex; flex-direction: column; padding: 4px 4px 6px; scrollbar-width: none; }
   .ask { flex: none; display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
   .ask img, .ask .ph { flex: none; width: 44px; height: 56px; border-radius: 10px; object-fit: cover; background: var(--hairline); }
@@ -660,7 +675,7 @@
   .notnow { flex: none; border: 0; background: transparent; color: var(--secondary); font: inherit; font-size: 13px; padding: 10px 0 6px; cursor: pointer; }
   .recents { position: absolute; inset: 0; overflow-y: auto; display: flex; flex-direction: column; scrollbar-width: none; }
   .recents button {
-    flex: none; border: 0; background: transparent; padding: 11px 6px; color: var(--text); font: inherit; font-size: 15px; text-align: start;
+    flex: none; border: 0; background: transparent; padding: 11px 6px; color: var(--text); font: inherit; font-size: calc(15px * var(--z)); text-align: start;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; unicode-bidi: plaintext; border-radius: 10px;
   }
   .recents button:hover { background: color-mix(in srgb, var(--text) 6%, transparent); }

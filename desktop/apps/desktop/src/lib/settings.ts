@@ -19,12 +19,14 @@ export interface AppSettings {
   textModel: string;
   imageModel: string;
   startAtLogin: boolean;
+  /** The notes window's zoom (1 = 100%). The card has its own, for its text, in card.json. */
+  zoom: number;
 }
 
 export const DEFAULT_MODEL = "deepseek/deepseek-v4.1-flash-1017";
 const defaults: AppSettings = {
   color: "system", shotMode: "ask", shotTtl: 60, shotDir: "", suggestCategories: true,
-  textModel: "", imageModel: "", startAtLogin: true,
+  textModel: "", imageModel: "", startAtLogin: true, zoom: 1,
 };
 
 let current: AppSettings = { ...defaults };
