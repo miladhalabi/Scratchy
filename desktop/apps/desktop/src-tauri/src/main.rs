@@ -302,16 +302,21 @@ fn card_boot(app: AppHandle) {
     if overlay::OPEN_ON_BOOT.swap(false, std::sync::atomic::Ordering::SeqCst) { overlay::toggle(&app) } else { overlay::warm_up(&app) }
 }
 
-/// The notes window: made when it is asked for and really closed when you close it (the notes engine lives in
-/// the card's window, so nothing is lost).
+/// The notes window. It is made at startup, hidden unless asked for, and closing it only hides it, so it opens
+/// at once every time (the notes engine lives in the card's window either way).
+fn make_main(app: &AppHandle, visible: bool) {
+    let _ = tauri::WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::App("index.html?w=main".into()))
+        .title("Scratchy").inner_size(1040.0, 740.0).min_inner_size(420.0, 480.0)
+        .visible(visible)
+        .disable_drag_drop_handler()                         // dropped images reach the page
+        .build();
+}
+
 pub fn open_main(app: &AppHandle) {
     let a = app.clone();
     let _ = app.run_on_main_thread(move || {
         if let Some(w) = a.get_webview_window("main") { let _ = w.show(); let _ = w.unminimize(); let _ = w.set_focus(); return; }
-        let _ = tauri::WebviewWindowBuilder::new(&a, "main", tauri::WebviewUrl::App("index.html?w=main".into()))
-            .title("Scratchy").inner_size(1040.0, 740.0).min_inner_size(420.0, 480.0)
-            .disable_drag_drop_handler()                     // dropped images reach the page
-            .build();
+        make_main(&a, true);
     });
 }
 
@@ -426,9 +431,15 @@ fn main() {
             shots::start(&h);
             #[cfg(unix)]
             hypr::start();
-            if !toggle && !background { open_main(&h); }
+            make_main(&h, !toggle && !background);
             remote::listen(h);
             Ok(())
+        })
+        // Closing the notes window hides it, ready for next time. Quit is in the tray.
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                if window.label() == "main" { api.prevent_close(); let _ = window.hide(); }
+            }
         })
         .run(tauri::generate_context!())
         .expect("error while running Scratchy");

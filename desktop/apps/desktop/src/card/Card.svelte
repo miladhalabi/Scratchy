@@ -322,6 +322,7 @@
       edge === "top" ? -(y + h + 24) : edge === "bottom" ? H() - y + 24 : 0];
   };
 
+  let keyTimer: ReturnType<typeof setTimeout> | undefined;
   function open() {
     const reverse = phase === "closing";
     const fromT = reverse && anim ? anim.t() : 1;
@@ -330,7 +331,10 @@
     if (!reverse) { pick(); if (shotWaiting) offerShot(); flushSync(); fit(); place(); }
     syncIfStale();
     void refreshAccent();
-    invoke("card_keyboard", { exclusive: !pinned }).catch(() => {});
+    // The keyboard comes to the card as it opens, pinned or not. A pinned card then lets go of the exclusive hold
+    // once it has it (see shown), so a click on another window still takes the keyboard there.
+    clearTimeout(keyTimer);
+    invoke("card_keyboard", { exclusive: true }).catch(() => {});
     syncInput();
 
     const size = `${W()}x${H()}`;
@@ -377,6 +381,7 @@
     place();
     phase = "open";
     if (!cardEl.contains(document.activeElement)) editor.focus(true);
+    if (pinned) keyTimer = setTimeout(() => { if (pinned && phase === "open") invoke("card_keyboard", { exclusive: false }).catch(() => {}); }, 250);
   }
 
   function close() {
