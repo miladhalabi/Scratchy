@@ -612,7 +612,7 @@
       <!-- svelte-ignore a11y_no_static_element_interactions -->
       <div class="rz {d}" data-dir={d} onpointerdown={resizeStart} onpointermove={resizeMove} onpointerup={resizeEnd} onpointercancel={resizeEnd}></div>
     {/each}
-    {#if viewing}<ImageViewer name={viewing} onclose={() => (viewing = null)} />{/if}
+    {#if viewing}<ImageViewer name={viewing} {title} onclose={() => (viewing = null)} />{/if}
   </div>
 </div>
 

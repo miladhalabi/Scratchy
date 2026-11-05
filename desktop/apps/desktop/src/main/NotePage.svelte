@@ -293,7 +293,7 @@
       <RichEditor bind:this={editor} class="body" placeholder="Start typing…" onchange={typed} onselect={() => version++} />
     </div>
   </div>
-  {#if viewing}<ImageViewer name={viewing} onclose={() => (viewing = null)} />{/if}
+  {#if viewing}<ImageViewer name={viewing} {title} onclose={() => (viewing = null)} />{/if}
 </div>
 
 {#if toast}<div class="toast" role="status">{toast.text}</div>{/if}

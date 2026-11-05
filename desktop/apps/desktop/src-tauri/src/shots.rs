@@ -184,3 +184,20 @@ pub async fn latest_screenshot() -> Option<serde_json::Value> {
     let (_, p) = images(&dir()).into_iter().next()?;
     Some(encode(&fs::read(&p).ok()?, mime_of(&p)?))
 }
+
+/// Puts a note's image on the clipboard. It is noted as seen first, so the watcher doesn't offer it back as a
+/// new screenshot.
+#[tauri::command]
+pub async fn copy_image(app: AppHandle, name: String) -> Result<(), String> {
+    use std::io::Write;
+    use tauri::Manager;
+    if name.is_empty() || name.contains('/') || name.starts_with('.') { return Err("bad file name".into()) }
+    let path = app.path().app_data_dir().map_err(|e| e.to_string())?.join("attachments").join(&name);
+    let bytes = fs::read(&path).map_err(|e| e.to_string())?;
+    let mime = mime_of(&path).unwrap_or("image/png");
+    *LAST.lock().unwrap() = Some((Instant::now(), print(&bytes)));
+    let mut child = Command::new("wl-copy").args(["--type", mime]).stdin(Stdio::piped()).spawn().map_err(|e| e.to_string())?;
+    child.stdin.take().ok_or("no stdin")?.write_all(&bytes).map_err(|e| e.to_string())?;
+    child.wait().map_err(|e| e.to_string())?;
+    Ok(())
+}

@@ -318,6 +318,35 @@ pub fn open_main(app: &AppHandle) {
 #[tauri::command]
 fn show_main(app: AppHandle) { open_main(&app) }
 
+/// The Downloads folder: XDG's, else ~/Downloads.
+fn downloads() -> PathBuf {
+    if let Ok(o) = std::process::Command::new("xdg-user-dir").arg("DOWNLOAD").output() {
+        let d = String::from_utf8_lossy(&o.stdout).trim().to_string();
+        if o.status.success() && !d.is_empty() { return PathBuf::from(d) }
+    }
+    PathBuf::from(std::env::var("HOME").unwrap_or_default()).join("Downloads")
+}
+
+/// Copies a note's image into Downloads, named after the note ("Shopping list.jpg", then "Shopping list (2).jpg"
+/// rather than replacing anything). Returns where it went.
+#[tauri::command]
+async fn save_image(app: AppHandle, name: String, title: String) -> Result<String, String> {
+    safe(&name)?;
+    let from = dir(&app, Some("attachments"))?.join(&name);
+    let ext = from.extension().and_then(|e| e.to_str()).unwrap_or("jpg").to_string();
+    let clean: String = title.chars().map(|c| if c == '/' || c == '\\' || c.is_control() { ' ' } else { c }).collect();
+    let mut base: String = clean.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(60).collect();
+    base = base.trim_matches('.').trim().to_string();
+    if base.is_empty() { base = "Scratchy image".into() }
+    let to_dir = downloads();
+    fs::create_dir_all(&to_dir).map_err(|e| e.to_string())?;
+    let mut to = to_dir.join(format!("{base}.{ext}"));
+    let mut n = 2;
+    while to.exists() { to = to_dir.join(format!("{base} ({n}).{ext}")); n += 1; }
+    fs::copy(&from, &to).map_err(|e| e.to_string())?;
+    Ok(to.to_string_lossy().into_owned())
+}
+
 /// What the clipboard holds for the Paste button: an image (base64) if there is one, else its text.
 #[tauri::command]
 async fn clipboard_read() -> Result<serde_json::Value, String> {
@@ -369,7 +398,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             read_text, write_text, remove_text, read_attachment, write_attachment, has_attachment, data_path, system_accent, toggle_path, autostart_get, autostart_set,
             google_client, oauth_start, oauth_wait, open_url, secret_get, secret_set, secret_delete,
-            card_hide, card_input, card_keyboard, card_boot, show_main, clipboard_read, set_zoom,
+            card_hide, card_input, card_keyboard, card_boot, show_main, clipboard_read, set_zoom, save_image, shots::copy_image,
             shots::shot_peek, shots::shot_take, shots::shot_clear, shots::shots_dir, shots::latest_screenshot, hypr::card_blur, hypr::hyprland, log
         ])
         .setup(move |app| {
