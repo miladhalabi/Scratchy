@@ -104,6 +104,12 @@
   let viewing: string | null = $state(null);
   /** Text and image size inside the card (Ctrl+= / Ctrl+- / Ctrl+0, Ctrl+scroll); the card keeps its size. */
   let zoom = $state(1);
+  /** How solid the card is (Settings > Appearance); below 1 it is see-through, blurred behind on Hyprland. */
+  let opacity = $state(1);
+  function applyLook() {
+    opacity = Math.min(1, Math.max(0.2, prefs?.opacity ?? 1));
+    invoke("card_blur", { on: opacity < 1 && !!prefs?.blur }).catch(() => {});
+  }
   function zoomTo(dir: 1 | -1 | 0) {
     zoom = stepZoom(zoom, dir);
     if (prefs) { prefs.zoom = zoom; saveCard(prefs); }
@@ -299,18 +305,21 @@
     const r = { x, y, w, h };
     const { edge, tx, ty } = nearestEdge(r, sw, sh);
     const key = [title, editor.markdown(), Math.round(w), Math.round(h), colors.floating, colors.text, pinned, edge === "left" || edge === "right",
-      continuing?.id ?? "", continuing?.updatedAt ?? 0, recents ? "r" : "", note?.images.join(",") ?? "", viewing ?? "", chooser ? `c${chooser.preview.length}` : "", zoom].join("|");
+      continuing?.id ?? "", continuing?.updatedAt ?? 0, recents ? "r" : "", note?.images.join(",") ?? "", viewing ?? "", chooser ? `c${chooser.preview.length}` : "", zoom, opacity].join("|");
     if (genie && genie.key === key) { genie.retarget(r, edge, tx, ty); return genie; }
     genie?.clear();
     genie = new Genie(root, r, edge, tx, ty);
-    genie.build(cardEl);
+    genie.build(cardEl, 28, opacity < 1 ? 0 : 1);
     genie.key = key;
     return genie;
   }
 
-  const edgeShift = () => {
+  /** How far the slide starts from: a short way with the fade, or from just past the screen edge without it. */
+  const edgeShift = (full: boolean) => {
     const { edge } = nearestEdge({ x, y, w, h }, W(), H());
-    return [edge === "left" ? -60 : edge === "right" ? 60 : 0, edge === "top" ? -60 : edge === "bottom" ? 60 : 0];
+    if (!full) return [edge === "left" ? -60 : edge === "right" ? 60 : 0, edge === "top" ? -60 : edge === "bottom" ? 60 : 0];
+    return [edge === "left" ? -(x + w + 24) : edge === "right" ? W() - x + 24 : 0,
+      edge === "top" ? -(y + h + 24) : edge === "bottom" ? H() - y + 24 : 0];
   };
 
   function open() {
@@ -346,11 +355,12 @@
       cardEl.style.visibility = "visible";
       editor.focus(true);                                  // visible from the start: typing works while it slides in
       let first = true;
-      anim = runT(fromT, 0, 240 * speed() * fromT, easeOut, (t) => {
+      const fade = prefs.fade;
+      anim = runT(fromT, 0, (fade ? 240 : 340) * speed() * fromT, easeOut, (t) => {
         if (first) { first = false; firstFrame(); }
-        const [dx, dy] = edgeShift();
+        const [dx, dy] = edgeShift(!fade);
         cardEl.style.transform = `translate3d(${x + dx * t}px,${y + dy * t}px,0)`;
-        cardEl.style.opacity = String(1 - t);
+        cardEl.style.opacity = fade ? String(1 - t) : "1";
       }, shown);
     } else {
       cardEl.style.visibility = "visible";
@@ -384,10 +394,11 @@
       cardEl.style.visibility = "hidden";
       anim = runT(fromT, 1, 480 * speed() * (1 - fromT), accelDecel, (t) => genie!.frame(t), hidden);
     } else if (prefs.anim === "slide") {
-      anim = runT(fromT, 1, 200 * speed() * (1 - fromT), (p) => p * p, (t) => {
-        const [dx, dy] = edgeShift();
+      const fade = prefs.fade;
+      anim = runT(fromT, 1, (fade ? 200 : 280) * speed() * (1 - fromT), (p) => p * p, (t) => {
+        const [dx, dy] = edgeShift(!fade);
         cardEl.style.transform = `translate3d(${x + dx * t}px,${y + dy * t}px,0)`;
-        cardEl.style.opacity = String(1 - t);
+        cardEl.style.opacity = fade ? String(1 - t) : "1";
       }, hidden);
     } else hidden();
   }
@@ -502,6 +513,7 @@
       prefs = await loadCard();
       pinned = prefs.pinned;
       zoom = prefs.zoom;
+      applyLook();
       w = prefs.w; h = prefs.h;
       x = prefs.x ?? W() - w - 48;
       y = prefs.y ?? (H() - h) / 2;
@@ -520,6 +532,7 @@
       await listen<Partial<CardState>>("card-prefs", ({ payload }) => {
         Object.assign(prefs, payload);
         if (payload.zoom) zoom = payload.zoom;
+        if (payload.opacity !== undefined || payload.blur !== undefined) applyLook();
         saveCard(prefs);
         if (payload.anim && payload.anim !== "genie") { genie?.clear(); genie = null; }
       });
@@ -534,7 +547,7 @@
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div class="root" bind:this={root} onpointerdown={outside}>
-  <div class="card" bind:this={cardEl} style:--z={zoom} role="presentation" onpastecapture={pasted} ondrop={dropped}
+  <div class="card" class:glass={opacity < 1} bind:this={cardEl} style:--z={zoom} style:--solid={`${Math.round(opacity * 100)}%`} role="presentation" onpastecapture={pasted} ondrop={dropped}
     ondragover={(e) => { if (e.dataTransfer?.types.includes("Files")) { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; } }}>
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div class="head" onpointerdown={dragStart} onpointermove={dragMove} onpointerup={dragEnd} onpointercancel={dragEnd}>
@@ -614,7 +627,7 @@
   .card {
     position: absolute; left: 0; top: 0;
     display: flex; flex-direction: column; padding-top: 6px;
-    background: var(--floating); color: var(--text);
+    background: color-mix(in srgb, var(--floating) var(--solid, 100%), transparent); color: var(--text);
     border-radius: 20px;
     border: 1px solid var(--hairline);
     box-shadow: 0 10px 28px rgb(0 0 0 / 0.3), 0 2px 6px rgb(0 0 0 / 0.16);
@@ -651,6 +664,8 @@
   .ainote { flex: none; font-size: 12px; color: var(--secondary); padding: 6px 4px 0; }
   .rule { flex: none; height: 1px; margin: 0 4px; background: var(--hairline); }
   .rule.full { margin: 0; }
+  /* See-through: no shadow (it would show through the card, and get blurred with it). */
+  .card.glass { box-shadow: none; border-color: color-mix(in srgb, var(--text) 18%, transparent); }
   .flow { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; scrollbar-width: none; }
   .card :global(.body) { flex: 1 0 auto; }
   .card :global(.body .rich) { overflow: visible; }

@@ -75,7 +75,7 @@ export class Genie {
   show() { if (this.layer) this.layer.style.visibility = "visible"; }
 
   /** Makes the strips from the card as it looks now. */
-  build(card: HTMLElement, n = 28) {
+  build(card: HTMLElement, n = 28, overlap = 1) {
     this.n = n;
     const layer = document.createElement("div");
     layer.className = "genie";
@@ -91,9 +91,10 @@ export class Genie {
     for (let i = 0; i < n; i++) {
       const s = document.createElement("div");
       s.className = "strip";
-      // 1px wider than its share, so neighbours overlap and no hairline gap shows between strips.
-      s.style.width = `${this.across ? step + 1 : w}px`;
-      s.style.height = `${this.across ? h : step + 1}px`;
+      // 1px wider than its share, so neighbours overlap and no hairline gap shows between strips (not for a
+      // see-through card, where the overlap would show as darker lines).
+      s.style.width = `${this.across ? step + overlap : w}px`;
+      s.style.height = `${this.across ? h : step + overlap}px`;
       const copy = proto.cloneNode(true) as HTMLElement;
       copy.style.transform = this.across ? `translate3d(${-i * step}px,0,0)` : `translate3d(0,${-i * step}px,0)`;
       copy.style.width = `${w}px`;

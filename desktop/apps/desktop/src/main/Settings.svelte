@@ -32,6 +32,7 @@
   let togglePath = $state("");
   let copied = $state("");
   let startAtLogin = $state(false);
+  let hyprland = $state(false);
 
   // ---- the sync and password forms ----
   type Form = "connect" | "newPassword" | "change" | null;
@@ -108,6 +109,7 @@
     aiKey().then((k) => { key = k; });
     invoke<string>("toggle_path").then((p) => { togglePath = p; });
     invoke<boolean>("autostart_get").then((v) => { startAtLogin = v; });
+    invoke<boolean>("hyprland").then((v) => { hyprland = v; });
     return () => { off.then((f) => f()); };
   });
 </script>
@@ -223,15 +225,37 @@
             onselect={(i) => setCard({ anim: anims[i][0] })} /></div>
           <p class="caption">Genie pulls the card out of the nearest screen edge and back in. Slide slides it in from that edge.</p>
         </div>
-        <button class="row adv" onclick={() => (advanced = !advanced)}><span>Advanced</span><span class="chev" class:open={advanced}><Icon name="chevron" size={22} /></span></button>
-        {#if advanced}
-          <div class="row" class:dim={card.anim !== "genie"}>
-            <div class="slider"><span>Genie speed</span><b>{card.speed}%</b></div>
-            <input type="range" min="50" max="200" step="5" value={card.speed} disabled={card.anim !== "genie"}
-              oninput={(e) => setCard({ speed: +(e.currentTarget as HTMLInputElement).value })} />
-            <p class="caption">100% is the default. Lower is slower, higher is faster.</p>
+        {#if card.anim === "slide"}
+          <div class="row">
+            <p class="title">Fade</p>
+            <div class="seg"><Segmented options={["With fade", "Without fade"]} selected={card.fade ? 0 : 1}
+              onselect={(i) => setCard({ fade: i === 0 })} /></div>
+            <p class="caption">With fade, the card fades in over a short slide. Without, it slides all the way in from the edge of the screen.</p>
           </div>
         {/if}
+        <div class="row" class:dim={card.anim === "none"}>
+          <div class="slider"><span>Speed</span><b>{card.speed}%</b></div>
+          <input type="range" min="50" max="200" step="5" value={card.speed} disabled={card.anim === "none"}
+            oninput={(e) => setCard({ speed: +(e.currentTarget as HTMLInputElement).value })} />
+          <p class="caption">100% is the default. Lower is slower, higher is faster.</p>
+        </div>
+      </div>
+      <h2>Card</h2>
+      <div class="group">
+        <div class="row">
+          <div class="slider"><span>Background</span><b>{card.opacity >= 1 ? "Solid" : `${Math.round(card.opacity * 100)}%`}</b></div>
+          <input type="range" min="20" max="100" step="5" value={Math.round(card.opacity * 100)}
+            oninput={(e) => setCard({ opacity: +(e.currentTarget as HTMLInputElement).value / 100 })} />
+          <p class="caption">Lower lets what is behind the card show through. The text stays solid.</p>
+        </div>
+        <div class="row" class:dim={!hyprland || card.opacity >= 1}>
+          <p class="title">Blur behind the card</p>
+          <div class="seg"><Segmented options={["On", "Off"]} selected={card.blur ? 0 : 1} disabled={!hyprland || card.opacity >= 1}
+            onselect={(i) => setCard({ blur: i === 0 })} /></div>
+          <p class="caption">{hyprland
+            ? "Blurs only what is under the card, for a frosted look, when the background isn't solid. Scratchy asks Hyprland for it while it runs; your config isn't changed."
+            : "Needs Hyprland."}</p>
+        </div>
       </div>
 
     {:else if page === "shots" && s}

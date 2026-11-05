@@ -9,6 +9,7 @@ use std::{
 };
 mod overlay;
 mod remote;
+mod hypr;
 mod shots;
 mod tray;
 use tauri::{AppHandle, Manager, State};
@@ -369,13 +370,15 @@ fn main() {
             read_text, write_text, remove_text, read_attachment, write_attachment, has_attachment, data_path, system_accent, toggle_path, autostart_get, autostart_set,
             google_client, oauth_start, oauth_wait, open_url, secret_get, secret_set, secret_delete,
             card_hide, card_input, card_keyboard, card_boot, show_main, clipboard_read, set_zoom,
-            shots::shot_peek, shots::shot_take, shots::shot_clear, shots::shots_dir, shots::latest_screenshot, log
+            shots::shot_peek, shots::shot_take, shots::shot_clear, shots::shots_dir, shots::latest_screenshot, hypr::card_blur, hypr::hyprland, log
         ])
         .setup(move |app| {
             let h = app.handle().clone();
             overlay::setup(&h);
             if let Err(e) = tray::start(&h) { eprintln!("no tray icon: {e}"); }
             shots::start(&h);
+            #[cfg(unix)]
+            hypr::start();
             if !toggle && !background { open_main(&h); }
             remote::listen(h);
             Ok(())

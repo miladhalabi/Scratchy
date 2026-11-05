@@ -11,13 +11,19 @@ export interface CardState extends CardPrefs {
   h: number;
   pinned: boolean;
   anim: Anim;
-  /** Genie speed, 50–200 %. */
+  /** Genie and slide speed, 50–200 %. */
   speed: number;
+  /** Slide: fade in and out over a short slide (true), or slide all the way in from the edge without fading. */
+  fade: boolean;
+  /** How solid the card's background is, 0.2–1 (text stays solid). */
+  opacity: number;
+  /** Blur what is behind a see-through card (Hyprland), only under the card. */
+  blur: boolean;
   /** The size of the card's text and images (1 = 100%); the card itself keeps its size. */
   zoom: number;
 }
 
-const defaults: CardState = { mode: "recent", w: 400, h: 460, pinned: false, anim: "genie", speed: 100, zoom: 1 };
+const defaults: CardState = { mode: "recent", w: 400, h: 460, pinned: false, anim: "genie", speed: 100, fade: true, opacity: 1, blur: true, zoom: 1 };
 
 export async function loadCard(): Promise<CardState> {
   const t = await files.readText("card.json").catch(() => null);
