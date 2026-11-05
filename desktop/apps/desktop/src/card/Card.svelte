@@ -19,7 +19,7 @@
   import { startEngine, store } from "../lib/engine";
   import { syncIfStale } from "../lib/sync";
   import { Genie, nearestEdge } from "./genie";
-  import { Spring, Tracker, accelDecel, clamp, decelerate, easeOut, project } from "./motion";
+  import { Spring, accelDecel, clamp, decelerate, easeOut } from "./motion";
   import { loadCard, saveCard, type CardState } from "./prefs";
 
   type Phase = "closed" | "opening" | "open" | "closing";
@@ -408,33 +408,30 @@
 
   // ---- drag (by the header) ----
 
-  let drag: { id: number; ox: number; oy: number; track: Tracker } | null = null;
+  let drag: { id: number; ox: number; oy: number } | null = null;
 
   function dragStart(e: PointerEvent) {
     if (e.button !== 0 || (e.target as HTMLElement).closest("button") || phase !== "open") return;
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
     springing = false;                                   // grab it mid-flight, from where it is drawn now
-    drag = { id: e.pointerId, ox: e.clientX - x, oy: e.clientY - y, track: new Tracker() };
-    drag.track.add(e.clientX, e.clientY);
+    drag = { id: e.pointerId, ox: e.clientX - x, oy: e.clientY - y };
     e.preventDefault();
   }
   function dragMove(e: PointerEvent) {
     if (!drag || e.pointerId !== drag.id) return;
     x = e.clientX - drag.ox;
     y = e.clientY - drag.oy;
-    drag.track.add(e.clientX, e.clientY);
     cardEl.style.transform = `translate3d(${x}px,${y}px,0)`;
   }
   function dragEnd(e: PointerEvent) {
     if (!drag || e.pointerId !== drag.id) return;
-    const { vx, vy } = drag.track.velocity();
     drag = null;
-    // A flick throws the card: land where it would coast to, kept on the screen.
-    const tx = clamp(x + project(vx), MARGIN, W() - w - MARGIN);
-    const ty = clamp(y + project(vy), MARGIN, H() - h - MARGIN);
-    const flick = Math.hypot(vx, vy) > 900;
-    for (const [s, v, to, now] of [[sx, vx, tx, x], [sy, vy, ty, y]] as const) {
-      s.value = now; s.velocity = v; s.target = to; s.tune(flick ? 0.45 : 0.35, flick ? 0.82 : 1);
+    // The card stays where it was let go. Only a card dropped partly off the screen eases back onto it.
+    const tx = clamp(x, MARGIN, W() - w - MARGIN);
+    const ty = clamp(y, MARGIN, H() - h - MARGIN);
+    if (tx === x && ty === y) { remember(); syncInput(); return; }
+    for (const [s, to, now] of [[sx, tx, x], [sy, ty, y]] as const) {
+      s.value = now; s.velocity = 0; s.target = to; s.tune(0.35, 1);
     }
     springing = true;
     let last = performance.now();
