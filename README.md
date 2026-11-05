@@ -4,21 +4,22 @@
 </h1>
 
 <p align="center">
-  Quick notes that open <b>over whatever you are doing</b>, on your phone and on your desktop.<br>
-  Write the idea, close the card, carry on. You never left what you were doing.
+  Quick notes that open <b>over whatever you are doing</b>, on your phone and on your desktop,<br>
+  and <b>sync between them in about a second</b>, end-to-end encrypted.
 </p>
 
 <p align="center">
   <img alt="Android 8.0+" src="https://img.shields.io/badge/Android-8.0%2B-3ddc84?logo=android&logoColor=white">
   <img alt="Linux" src="https://img.shields.io/badge/Linux-Hyprland-1793d1?logo=archlinux&logoColor=white">
   <img alt="Windows and macOS planned" src="https://img.shields.io/badge/Windows%20%26%20macOS-planned-lightgrey">
-  <img alt="End-to-end encrypted sync" src="https://img.shields.io/badge/sync-end--to--end%20encrypted-e68e0d">
+  <img alt="Sync in about a second" src="https://img.shields.io/badge/sync-~1%20second-e68e0d">
+  <img alt="End-to-end encrypted" src="https://img.shields.io/badge/end--to--end-encrypted-2ea44f">
 </p>
 
 <p align="center">
+  <a href="#sync">Sync in a second</a> ·
   <a href="#features">Features</a> ·
   <a href="#desktop">Desktop</a> ·
-  <a href="#sync">Sync</a> ·
   <a href="#install">Install</a> ·
   <a href="docs/DEVELOPMENT.md">Developer notes</a>
 </p>
@@ -36,13 +37,47 @@
   </tr>
 </table>
 
+<p align="center">
+  <b>⚡ Type on your phone. It is on your computer before you look up.</b><br>
+  <sub>Every edit reaches your other devices in about a second, even while their card is open, sealed with AES-256 the whole way.</sub>
+</p>
+
 ## 💡 Why it exists
 
 An idea shows up while you are watching a video, reading, or in the middle of a chat. Opening a notes app means leaving all of that, and by the time you are back the thought is gone. Scratchy puts the note **on top of what you are doing**, then gets out of the way.
 
+<a id="sync"></a>
+
+## ⚡ Sync in about a second
+
+Most note apps sync when they get around to it. Scratchy sends each edit the moment you pause: **0.4 seconds after your last keystroke** it is on its way, and your other devices show it about a second later, even if that note is open on screen right now.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant P as 📱 Phone
+    participant R as ⚡ Relay (Cloudflare)
+    participant C as 🖥️ Computer
+    participant D as 🗂️ Your Google Drive
+    Note over P: you stop typing (0.4 s)
+    P->>P: seal the change (AES-256-GCM)
+    P->>R: sealed update
+    R-->>C: pushed at once over a live connection
+    C->>C: open it and show it, card open or not
+    Note over P,C: about 1 second, end to end
+    P->>D: the lasting copy (1.5 s after you stop typing)
+```
+
+- **Live, not polling.** Every device keeps one connection open to a tiny Cloudflare Worker. An update is pushed the instant it arrives, so nothing waits for a timer.
+- **The relay never sees your notes.** It only passes sealed messages along and keeps none of your notes. Each note is encrypted on your device with **AES-256-GCM**, using a key derived from your vault password (PBKDF2, 120,000 rounds).
+- **Drive is the safety net.** Your Google Drive keeps the lasting, encrypted copy in a private app folder, saved 1.5 seconds after you stop typing. A full catch-up runs every 15 minutes and whenever you come back to the app, so a device that was off or offline gets everything.
+- **No lost edits.** Each note is its own file. Different lines changed on two devices are merged line by line; the same line changed on both keeps the newer edit and saves the other as a "(conflict)" note. Nothing is overwritten silently, and a device with a wrong clock cannot win.
+- **Offline is normal.** Write on a plane and everything catches up when you are back. Deleted notes stay deleted.
+- **Change the vault password** and everything is re-encrypted for you.
+
 <a id="features"></a>
 
-## ⚡ Capture without leaving
+## 📍 Capture without leaving
 
 - **An edge bar that is always there.** A thin line on the left or right edge of the phone's screen, above every app, even a fullscreen video. Choose the side and how far from the edge it sits. It tucks away when you are not using it.
 - **A tap or a swipe opens the card**, with a genie animation that pulls the note out of the bar and sucks it back in when you close it. Prefer a plain slide, or nothing at all? One setting.
@@ -80,21 +115,11 @@ Nobody has to know markdown. You format with buttons, and the note is still save
 - **No account, no ads, no tracking.** Nothing leaves your device unless you turn on sync or ask for an AI feature. AI only ever sees the note you asked about, sent to OpenRouter with a key you paste in yourself.
 - **No back door.** If you forget the vault password, the synced copy cannot be recovered.
 
-<a id="sync"></a>
-
-## 🔄 Sync, the way it should work
-
-- **Instant across devices.** Edit on the phone and the note changes on your computer in about **a second**, even while its card is open. A small Cloudflare Worker relays the update and stores nothing.
-- **Encrypted before it leaves.** Every note is sealed on your device with **AES-256-GCM**, using a key derived from your vault password (PBKDF2, 120,000 rounds). Google Drive holds only scrambled files in a private app folder, and the relay only ever sees ciphertext.
-- **No lost edits.** Each note is its own file. Different lines changed on two devices are merged line by line; the same line changed on both keeps the newer edit and saves the other as a "(conflict)" note. Nothing is overwritten silently, and a device with a wrong clock cannot win.
-- **Offline is normal.** Write on a plane and everything catches up when you are back. Deleted notes stay deleted.
-- **Change the vault password** and everything is re-encrypted for you.
-
 <a id="desktop"></a>
 
 ## 🖥️ On your desktop too
 
-The desktop app brings the same card to your computer. A shortcut opens it over whatever you are doing, even a fullscreen video, and it shares the phone's notes, sync and vault. Linux comes first; Windows and macOS are planned.
+The desktop app brings the same card to your computer. A shortcut opens it over whatever you are doing, even a fullscreen video, and it shares the phone's notes and vault: **write on one, and the other has it a second later.** Linux comes first; Windows and macOS are planned.
 
 | | 📱 Phone | 🖥️ Desktop |
 | --- | --- | --- |
@@ -104,6 +129,7 @@ The desktop app brings the same card to your computer. A shortcut opens it over 
 | **Look** | Material You colors, solid or liquid glass | Your desktop's accent color; a see-through card with blur only under it (Hyprland) |
 | **Screenshots** | The bar turns green | The tray icon turns green; copied images count too |
 | **Secret notes** | Pull down the list | Ctrl+Shift+L in the notes window |
+| **Sync** | About a second, live | About a second, live, the same notes and vault |
 | **Keys** | Android Keystore | The system keyring |
 
 Also on the desktop: zoom with Ctrl+= and Ctrl+- (the card zooms its text and keeps its size); images by paste, drop or the Paste button; an image viewer that saves to Downloads; the full editor and Aa panel; start at login into the tray; and a notes window that is always ready.
