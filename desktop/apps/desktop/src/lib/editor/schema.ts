@@ -283,20 +283,24 @@ export const Behaviour = Extension.create<{ placeholder: string }>({
           // Pasted text is read as markdown, so an answer copied from an AI app arrives formatted (insertMarkdown).
           handlePaste: (view, e) => {
             const text = e.clipboardData?.getData("text/plain");
-            if (!text || !view.editable) return false;
-            if (view.state.selection.$from.parent.type.name === "codeBlock") return false;
-            const doc = view.state.schema.nodeFromJSON(linesToDoc(parse(text)));
-            const blocks: PMNode[] = [];
-            doc.forEach((b) => blocks.push(b));
-            const openStart = blocks[0]?.isTextblock ? 1 : 0, openEnd = blocks[blocks.length - 1]?.isTextblock ? 1 : 0;
-            view.dispatch(view.state.tr.replaceSelection(new Slice(Fragment.from(blocks), openStart, openEnd)).scrollIntoView());
-            return true;
+            return !!text && pasteMarkdown(view, text);
           },
         },
       }),
     ];
   },
 });
+
+/** Puts markdown text at the cursor as formatted lines (a paste, or the Paste button). */
+export function pasteMarkdown(view: EditorView, text: string): boolean {
+  if (!view.editable || view.state.selection.$from.parent.type.name === "codeBlock") return false;
+  const doc = view.state.schema.nodeFromJSON(linesToDoc(parse(text)));
+  const blocks: PMNode[] = [];
+  doc.forEach((b) => blocks.push(b));
+  const openStart = blocks[0]?.isTextblock ? 1 : 0, openEnd = blocks[blocks.length - 1]?.isTextblock ? 1 : 0;
+  view.dispatch(view.state.tr.replaceSelection(new Slice(Fragment.from(blocks), openStart, openEnd)).scrollIntoView());
+  return true;
+}
 
 export function extensions(opts: { placeholder?: string; editTable?: TableOptions["edit"] } = {}) {
   return [

@@ -8,6 +8,9 @@
   import { setLines } from "../lib/editor/schema";
   import Icon from "../lib/Icon.svelte";
   import AiTitles from "../lib/AiTitles.svelte";
+  import NoteImages from "../lib/NoteImages.svelte";
+  import ImageViewer from "../lib/ImageViewer.svelte";
+  import { imageFiles, importImage } from "../lib/attach";
   import { cardHeading } from "../lib/preview";
   import { formatWhen } from "../main/when";
   import "../lib/base.css";
@@ -26,7 +29,7 @@
   let title = $state("");
   /** The body as the phone would write it back: an untouched note keeps its exact original text. */
   let canon = "";
-  let note: Note | null = null;
+  let note: Note | null = $state.raw(null);      // raw: compared by identity with the store's copy
   /** The card reopened on a note you already had: say so, and offer a fresh one (the "Continuing" row). */
   let continuing: Note | null = $state(null);
   /** The recent notes list, shown in place of the editor. */
@@ -94,10 +97,41 @@
   }
   const typed = () => { clearTimeout(saveTimer); saveTimer = setTimeout(save, 400); };
 
+  // ---- images ----
+
+  let viewing: string | null = $state(null);
+  async function setImages(images: string[]) {
+    clearTimeout(saveTimer);
+    if (!note) return;
+    const md = editor.markdown();
+    const body = md === canon ? note.body : md;
+    canon = md;
+    note = await store.save({ ...note, title, body, images, updatedAt: Date.now() });
+    prefs.lastCardNote = note.id; prefs.lastCardAt = Date.now(); saveCard(prefs);
+  }
+  async function addImages(blobs: Blob[]) {
+    for (const b of blobs) {
+      try { const name = await importImage(b); if (note) await setImages([...note.images, name]); }
+      catch { aiSay("Couldn't add that image"); }
+    }
+  }
+  function pasted(e: ClipboardEvent) {
+    const imgs = imageFiles(e.clipboardData?.files);
+    if (!imgs.length) return;
+    e.preventDefault(); e.stopPropagation();
+    addImages(imgs);
+  }
+  function dropped(e: DragEvent) {
+    const imgs = imageFiles(e.dataTransfer?.files);
+    if (!imgs.length) return;
+    e.preventDefault(); e.stopPropagation();
+    addImages(imgs);
+  }
+
   function pick() {
     const p = pickCardNote(store.all(), prefs, Date.now(), () => crypto.randomUUID());
     note = p.note;
-    titles?.hide(); aiNote = "";
+    titles?.hide(); aiNote = ""; viewing = null;
     if (p.create) { store.save(p.note).then((n) => { note = n; prefs.scratchId = n.id; saveCard(prefs); }); }
     title = note.title;
     canon = canonical(note.body);
@@ -110,7 +144,7 @@
   function show(n: Note | null) {
     save();
     note = n ?? newNote(crypto.randomUUID());
-    titles?.hide(); aiNote = "";
+    titles?.hide(); aiNote = ""; viewing = null;
     title = note.title;
     canon = canonical(note.body);
     editor.load(note.body);
@@ -169,7 +203,7 @@
     const r = { x, y, w, h };
     const { edge, tx, ty } = nearestEdge(r, sw, sh);
     const key = [title, editor.markdown(), Math.round(w), Math.round(h), colors.floating, colors.text, pinned, edge === "left" || edge === "right",
-      continuing?.id ?? "", continuing?.updatedAt ?? 0, recents ? "r" : ""].join("|");
+      continuing?.id ?? "", continuing?.updatedAt ?? 0, recents ? "r" : "", note?.images.join(",") ?? "", viewing ?? ""].join("|");
     if (genie && genie.key === key) { genie.retarget(r, edge, tx, ty); return genie; }
     genie?.clear();
     genie = new Genie(root, r, edge, tx, ty);
@@ -363,7 +397,7 @@
   }
 
   function keys(e: KeyboardEvent) {
-    if (e.key === "Escape") { e.preventDefault(); close(); }
+    if (e.key === "Escape") { e.preventDefault(); if (viewing) viewing = null; else close(); }
   }
 
   onMount(() => {
@@ -395,7 +429,8 @@
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div class="root" bind:this={root} onpointerdown={outside}>
-  <div class="card" bind:this={cardEl}>
+  <div class="card" bind:this={cardEl} role="presentation" onpastecapture={pasted} ondrop={dropped}
+    ondragover={(e) => { if (e.dataTransfer?.types.includes("Files")) { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; } }}>
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div class="head" onpointerdown={dragStart} onpointermove={dragMove} onpointerup={dragEnd} onpointercancel={dragEnd}>
       <button class="icon" class:on={!!recents} title="Recent notes" aria-label="Recent notes" onclick={toggleRecents}><Icon name="list" size={18} /></button>
@@ -420,7 +455,10 @@
         <div class="rule"></div>
         <AiTitles bind:this={titles} onpick={(t) => { title = t; typed(); }} onmessage={aiSay} />
         {#if aiNote}<span class="ainote">{aiNote}</span>{/if}
-        <RichEditor bind:this={editor} class="body" placeholder="Start typing…" onchange={typed} />
+        <div class="flow scroll">
+          <NoteImages images={note?.images ?? []} compact onopen={(n) => (viewing = n)} onremove={(n) => note && setImages(note.images.filter((x) => x !== n))} />
+          <RichEditor bind:this={editor} class="body" placeholder="Start typing…" onchange={typed} />
+        </div>
       </div>
       {#if recents}
         <div class="recents scroll">
@@ -438,6 +476,7 @@
       <!-- svelte-ignore a11y_no_static_element_interactions -->
       <div class="rz {d}" data-dir={d} onpointerdown={resizeStart} onpointermove={resizeMove} onpointerup={resizeEnd} onpointercancel={resizeEnd}></div>
     {/each}
+    {#if viewing}<ImageViewer name={viewing} onclose={() => (viewing = null)} />{/if}
   </div>
 </div>
 
@@ -489,7 +528,9 @@
   .ainote { flex: none; font-size: 12px; color: var(--secondary); padding: 6px 4px 0; }
   .rule { flex: none; height: 1px; margin: 0 4px; background: var(--hairline); }
   .rule.full { margin: 0; }
-  .card :global(.body) { flex: 1; min-height: 0; }
+  .flow { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; scrollbar-width: none; }
+  .card :global(.body) { flex: 1 0 auto; }
+  .card :global(.body .rich) { overflow: visible; }
   .card :global(.body .rich) { padding: 8px 4px; font-size: 15px; }
   .recents { position: absolute; inset: 0; overflow-y: auto; display: flex; flex-direction: column; scrollbar-width: none; }
   .recents button {

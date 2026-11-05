@@ -19,6 +19,7 @@ pub static OPEN_ON_BOOT: AtomicBool = AtomicBool::new(false);
 
 fn builder<'a>(app: &'a AppHandle) -> WebviewWindowBuilder<'a, tauri::Wry, AppHandle> {
     WebviewWindowBuilder::new(app, "card", WebviewUrl::App("index.html?w=card".into()))
+        .disable_drag_drop_handler()
         .title("Scratchy card")
         .transparent(true).decorations(false).shadow(false).resizable(false).visible(false).skip_taskbar(true)
 }

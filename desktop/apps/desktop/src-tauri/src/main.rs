@@ -302,12 +302,33 @@ pub fn open_main(app: &AppHandle) {
     let _ = app.run_on_main_thread(move || {
         if let Some(w) = a.get_webview_window("main") { let _ = w.show(); let _ = w.unminimize(); let _ = w.set_focus(); return; }
         let _ = tauri::WebviewWindowBuilder::new(&a, "main", tauri::WebviewUrl::App("index.html?w=main".into()))
-            .title("Scratchy").inner_size(1040.0, 740.0).min_inner_size(420.0, 480.0).build();
+            .title("Scratchy").inner_size(1040.0, 740.0).min_inner_size(420.0, 480.0)
+            .disable_drag_drop_handler()                     // dropped images reach the page
+            .build();
     });
 }
 
 #[tauri::command]
 fn show_main(app: AppHandle) { open_main(&app) }
+
+/// What the clipboard holds for the Paste button: an image (base64) if there is one, else its text.
+#[tauri::command]
+fn clipboard_read() -> Result<serde_json::Value, String> {
+    use std::process::Command;
+    let types = Command::new("wl-paste").arg("--list-types").output().map_err(|e| e.to_string())?;
+    let types = String::from_utf8_lossy(&types.stdout).into_owned();
+    let image = ["image/png", "image/jpeg", "image/webp", "image/gif", "image/bmp"].into_iter()
+        .find(|t| types.lines().any(|l| l.trim() == *t));
+    if let Some(t) = image {
+        let out = Command::new("wl-paste").args(["--no-newline", "--type", t]).output().map_err(|e| e.to_string())?;
+        if out.status.success() && !out.stdout.is_empty() {
+            return Ok(serde_json::json!({ "kind": "image", "mime": t, "b64": STANDARD.encode(&out.stdout) }));
+        }
+    }
+    if types.trim().is_empty() { return Ok(serde_json::json!({ "kind": "empty" })); }
+    let out = Command::new("wl-paste").arg("--no-newline").output().map_err(|e| e.to_string())?;
+    Ok(serde_json::json!({ "kind": "text", "text": String::from_utf8_lossy(&out.stdout) }))
+}
 
 /// Errors from the pages, printed with the app's own output.
 #[tauri::command]
@@ -335,7 +356,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             read_text, write_text, remove_text, read_attachment, write_attachment, has_attachment, data_path, system_accent, toggle_path, autostart_get, autostart_set,
             google_client, oauth_start, oauth_wait, open_url, secret_get, secret_set, secret_delete,
-            card_hide, card_input, card_keyboard, card_boot, show_main, log
+            card_hide, card_input, card_keyboard, card_boot, show_main, clipboard_read, log
         ])
         .setup(move |app| {
             let h = app.handle().clone();

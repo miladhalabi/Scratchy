@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { Editor } from "@tiptap/core";
-  import { extensions } from "./schema";
+  import { extensions, pasteMarkdown } from "./schema";
   import { docToMarkdown, markdownToDoc } from "./convert";
   import TableSheet from "./TableSheet.svelte";
   import "./editor.css";
@@ -33,6 +33,8 @@
 
   export const markdown = () => (editor ? docToMarkdown(editor.state.doc) : pending ?? "");
   export const instance = () => editor;
+  /** Text from the Paste button, put in like a paste. */
+  export function paste(text: string) { if (editor) { editor.commands.focus(); pasteMarkdown(editor.view, text); } }
   export function focus(end = false) { editor?.commands.focus(end ? "end" : undefined, { scrollIntoView: false }); }
 
   onMount(() => {

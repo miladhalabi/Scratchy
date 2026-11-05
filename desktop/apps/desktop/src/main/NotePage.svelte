@@ -7,6 +7,9 @@
   import AaPanel from "./AaPanel.svelte";
   import AiTitles from "../lib/AiTitles.svelte";
   import FormatIcon from "../lib/editor/FormatIcon.svelte";
+  import NoteImages from "../lib/NoteImages.svelte";
+  import ImageViewer from "../lib/ImageViewer.svelte";
+  import { clipBlob, imageFiles, importImage, readClipboard } from "../lib/attach";
   import { notes } from "../lib/notes";
   import { aiConfigured, categorize, formatMarkdown } from "../lib/ai";
   import { settings } from "../lib/settings";
@@ -24,6 +27,9 @@
   let category = $state(note.category);
   // svelte-ignore state_referenced_locally
   let secret = $state(note.secret);
+  // svelte-ignore state_referenced_locally
+  let images = $state([...note.images]);
+  let viewing: string | null = $state(null);
   /** What this page last loaded or saved, and the body as the phone would write it (untouched notes keep their text). */
   // svelte-ignore state_referenced_locally
   let base = { ...note };
@@ -50,11 +56,13 @@
 
   function current(): Note {
     const md = editor.markdown();
-    return { ...base, title, pinned, secret, category: secret ? "" : category, body: md === canon ? base.body : md };
+    return { ...base, title, pinned, secret, category: secret ? "" : category, body: md === canon ? base.body : md, images: [...images] };
   }
+  const sameImages = (a: string[], b: string[]) => a.length === b.length && a.every((x, i) => x === b[i]);
   const dirty = () => {
     const c = current();
-    return c.title !== base.title || c.body !== base.body || c.pinned !== base.pinned || c.category !== base.category || c.secret !== base.secret;
+    return c.title !== base.title || c.body !== base.body || c.pinned !== base.pinned || c.category !== base.category || c.secret !== base.secret
+      || !sameImages(c.images, base.images);
   };
 
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -123,9 +131,49 @@
     } catch (e) { say((e as Error).message || "No suggestion"); }
   }
 
+  // ---- Images ----
+
+  async function addImages(blobs: Blob[]) {
+    for (const b of blobs) {
+      try { images = [...images, await importImage(b)]; save(); }
+      catch { say("Couldn't add that image"); }
+    }
+  }
+  function removeImage(name: string) { images = images.filter((x) => x !== name); save(); }
+  /** Images pasted with Ctrl+V become attachments; text goes on to the editor. */
+  function pasted(e: ClipboardEvent) {
+    const imgs = imageFiles(e.clipboardData?.files);
+    if (!imgs.length) return;
+    e.preventDefault(); e.stopPropagation();
+    addImages(imgs);
+  }
+  function dragging(e: DragEvent) { if (e.dataTransfer?.types.includes("Files")) { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; } }
+  function dropped(e: DragEvent) {
+    const imgs = imageFiles(e.dataTransfer?.files);
+    if (!imgs.length) return;
+    e.preventDefault(); e.stopPropagation();
+    addImages(imgs);
+  }
+  /** The Paste button (pasteFromClipboard): clipboard images become attachments, text goes in at the cursor. */
+  async function pasteButton() {
+    const inTitle = document.activeElement === titleEl;
+    try {
+      const c = await readClipboard();
+      if (c.kind === "image") addImages([clipBlob(c)]);
+      else if (c.kind === "text" && c.text) {
+        if (inTitle) {
+          const a = titleEl.selectionStart, b = titleEl.selectionEnd, one = c.text.replace(/\s*\n\s*/g, " ");
+          title = title.slice(0, a) + one + title.slice(b);
+          requestAnimationFrame(() => { titleEl.focus(); titleEl.setSelectionRange(a + one.length, a + one.length); fitTitle(); });
+          typed();
+        } else editor.paste(c.text);
+      } else say(c.kind === "empty" ? "Clipboard is empty" : "Nothing to paste");
+    } catch { say("Couldn't read the clipboard"); }
+  }
+
   function load(n: Note) {
     base = { ...n };
-    title = n.title; pinned = n.pinned; category = n.category; secret = n.secret;
+    title = n.title; pinned = n.pinned; category = n.category; secret = n.secret; images = [...n.images];
     canon = canonical(n.body);
     editor.load(n.body);
     requestAnimationFrame(fitTitle);
@@ -135,7 +183,7 @@
   $effect(() => {
     const n = note;
     if (!editor || n.id !== base.id) return;
-    if ((n.title !== base.title || n.body !== base.body || n.pinned !== base.pinned || n.category !== base.category) && !dirty()) load(n);
+    if ((n.title !== base.title || n.body !== base.body || n.pinned !== base.pinned || n.category !== base.category || !sameImages(n.images, base.images)) && !dirty()) load(n);
   });
 
   function back() { save(); onback(); }
@@ -184,6 +232,7 @@
 
   function keys(e: KeyboardEvent) {
     if (sheet) return;
+    if (viewing) { if (e.key === "Escape") { e.preventDefault(); viewing = null; } return; }
     if (e.key === "Escape") { e.preventDefault(); if (panel) panel = false; else back(); }
     else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") { e.preventDefault(); save(); }
   }
@@ -197,12 +246,13 @@
 
 <svelte:window onkeydown={keys} onblur={save} onresize={fitTitle} />
 
-<div class="page">
+<div class="page" role="presentation" ondragover={dragging} ondrop={dropped}>
   <div class="top">
     <button class="icon text" onclick={back} title="Back (Esc)" aria-label="Back"><Icon name="back" size={26} /></button>
     <span class="grow"></span>
     <button class="icon" onclick={formatWithAi} title="Format with AI" aria-label="Format with AI"><FormatIcon kind="ai" tint="var(--accent)" /></button>
     <button class="icon accent" class:on={panel} onclick={() => (panel = !panel)} title="Format" aria-label="Format" aria-pressed={panel}><Icon name="format" size={26} /></button>
+    <button class="icon" onclick={pasteButton} title="Paste" aria-label="Paste"><Icon name="paste" size={26} /></button>
     <button class="icon" class:accent={secret} onclick={toggleSecret} title="Secret note" aria-label="Secret note" aria-pressed={secret}><Icon name="lock" size={26} /></button>
     <button class="icon" class:accent={pinned} onclick={togglePin} title={pinned ? "Unpin" : "Pin"} aria-label="Pin" aria-pressed={pinned}><Icon name="pin" size={26} /></button>
     <button class="icon" onclick={confirmDelete} title="Delete" aria-label="Delete"><Icon name="delete" size={26} /></button>
@@ -213,7 +263,7 @@
   {#if !secret}
     <button class="pill" class:set={!!category} onclick={pickCategory} dir="auto">{category || "＋ Category"}</button>
   {/if}
-  <div class="editor">
+  <div class="editor" onpastecapture={pasted}>
     <div class="titlerow">
       <textarea class="title" bind:this={titleEl} bind:value={title} oninput={() => { fitTitle(); typed(); }} placeholder="Title" dir="auto" rows="1" spellcheck="false"
         onkeydown={(e) => { if (e.key === "Enter") { e.preventDefault(); editor.focus(); } }}></textarea>
@@ -231,8 +281,12 @@
         <span class="aichip" class:accent={aiChip.accent}>{aiChip.text}</span>
       {/if}
     {/if}
-    <RichEditor bind:this={editor} class="body" placeholder="Start typing…" onchange={typed} onselect={() => version++} />
+    <div class="flow scroll">
+      <NoteImages {images} onopen={(n) => (viewing = n)} onremove={removeImage} />
+      <RichEditor bind:this={editor} class="body" placeholder="Start typing…" onchange={typed} onselect={() => version++} />
+    </div>
   </div>
+  {#if viewing}<ImageViewer name={viewing} onclose={() => (viewing = null)} />{/if}
 </div>
 
 {#if toast}<div class="toast" role="status">{toast.text}</div>{/if}
@@ -242,7 +296,7 @@
 {/if}
 
 <style>
-  .page { height: 100%; display: flex; flex-direction: column; }
+  .page { position: relative; height: 100%; display: flex; flex-direction: column; }
   .top { position: relative; flex: none; display: flex; align-items: center; padding: 8px 8px 4px; }
   .grow { flex: 1; }
   .icon {
@@ -283,7 +337,9 @@
   .aichip.accent { background: color-mix(in srgb, var(--accent) 15%, transparent); color: var(--accent); }
   button.aichip { cursor: pointer; }
   .rule { flex: none; height: 1px; margin: 0 4px; background: var(--hairline); }
-  .editor :global(.body) { flex: 1; min-height: 0; }
+  .flow { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; }
+  .editor :global(.body) { flex: 1 0 auto; }
+  .editor :global(.body .rich) { overflow: visible; }
   .editor :global(.body .rich) { padding: 8px 4px 40vh; font-size: 17px; }
   .toast {
     position: fixed; left: 50%; bottom: 40px; transform: translateX(-50%); z-index: 70; max-width: calc(100vw - 48px);
