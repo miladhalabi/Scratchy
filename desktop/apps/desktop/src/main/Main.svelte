@@ -12,6 +12,7 @@
   import VaultGate from "./VaultGate.svelte";
   import Thumb from "./Thumb.svelte";
   import { formatWhen } from "./when";
+  import { aiConfigured, categorize } from "../lib/ai";
   import "../lib/base.css";
   import "../lib/editor/editor.css";
 
@@ -39,6 +40,8 @@
   let secret = $state(false);
   let gate = $state(false);
   let notice: { text: string; timer: ReturnType<typeof setTimeout> } | null = $state(null);
+  let sorting = $state(false);
+  let keyed = $state(false);
 
   const visible = $derived(all.filter((n) => n.secret === secret));
   const plainNotes = $derived(all.filter((n) => !n.secret));
@@ -123,6 +126,37 @@
     sheet = { title: "Category", items };
   }
 
+  const say = (text: string) => {
+    if (notice) clearTimeout(notice.timer);
+    notice = { text, timer: setTimeout(() => (notice = null), 8000) };
+  };
+  /** Files every note without a category, 30 at a time (sortWithAi in MainActivity.kt). */
+  async function sortWithAi() {
+    if (sorting) return;
+    if (!(await aiConfigured())) { say("Add your OpenRouter key in Settings first"); return; }
+    sorting = true;
+    let filed = 0;
+    try {
+      const todo = plainNotes.filter((n) => !n.category.trim() && (n.title.trim() || n.body.trim()));
+      const known = [...categories];
+      for (let i = 0; i < todo.length; i += 30) {
+        const batch = todo.slice(i, i + 30);
+        const got = await categorize(batch.map((n) => `${n.title}\n${n.body.split("\n").map(plain).join("\n")}`.trim()), known);
+        for (const [j, raw] of got) {
+          const n = batch[j], c = n && cleanCategory(raw);
+          if (!n || !c) continue;
+          const name = canonicalCategory(c, known);
+          if (!known.includes(name)) known.push(name);
+          const now = all.find((x) => x.id === n.id);
+          if (now && !now.category.trim()) { notes.save({ ...now, category: name, updatedAt: Date.now() }); filed++; }
+        }
+      }
+      say(filed ? `Sorted ${filed} ${filed === 1 ? "note" : "notes"}` : "Nothing to sort");
+    } catch (e) {
+      say(filed ? `Sorted ${filed}, then: ${(e as Error).message}` : (e as Error).message || "Couldn't sort");
+    } finally { sorting = false; }
+  }
+
   function contextMenu(e: MouseEvent, n: Note) {
     e.preventDefault();
     menu = { note: n, x: Math.min(e.clientX, innerWidth - 196), y: Math.min(e.clientY, innerHeight - 170) };
@@ -158,11 +192,10 @@
 
   onMount(() => {
     const off = notes.watch((s) => { all = s.notes; sync = s.sync; vaultSetUp = s.vault.setUp; ready = true; });
-    const offNotice = notes.onNotice((text) => {
-      if (notice) clearTimeout(notice.timer);
-      notice = { text, timer: setTimeout(() => (notice = null), 8000) };
-    });
-    return () => { off.then((f) => f()); offNotice.then((f) => f()); };
+    const offNotice = notes.onNotice(say);
+    const checkKey = () => aiConfigured().then((v) => (keyed = v));
+    checkKey(); window.addEventListener("focus", checkKey);
+    return () => { off.then((f) => f()); offNotice.then((f) => f()); window.removeEventListener("focus", checkKey); };
   });
 </script>
 
@@ -205,6 +238,9 @@
           {/each}
           {#if categories.length && uncategorized}
             <button class="chip" class:on={filter === ""} role="tab" aria-selected={filter === ""} onclick={() => (filter = "")}>None</button>
+          {/if}
+          {#if uncategorized && keyed}
+            <button class="chip ai" disabled={sorting} onclick={sortWithAi}>{sorting ? "Sorting…" : "✦ Sort with AI"}</button>
           {/if}
         </div>
       {/if}
@@ -313,6 +349,8 @@
   }
   .chip.on { background: var(--accent); color: var(--on-accent); }
   .chip:active { transform: scale(0.95); }
+  .chip.ai { background: color-mix(in srgb, var(--accent) 15%, transparent); color: var(--accent); }
+  .chip.ai:disabled { opacity: 0.7; }
 
   main { flex: 1; min-height: 0; overflow-y: auto; scrollbar-width: none; margin: 0 -20px; padding: 8px 20px 96px; }
   main.nochips { padding-top: 18px; }

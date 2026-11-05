@@ -8,6 +8,8 @@ import { WrongPassword, type Note } from "@scratchy/core";
 import { LocalStore } from "./localStore";
 import * as sync from "./sync";
 import { checkVaultPassword, loadDataKey, loadVault, setVaultPassword, vaultSetUp } from "./vault";
+import { invoke } from "@tauri-apps/api/core";
+import { loadSettings } from "./settings";
 
 export const store = new LocalStore();
 
@@ -55,4 +57,6 @@ export async function startEngine() {
   });
   await sync.startSync(store, push, (text) => { emitTo("main", "notes-notice", { text }).catch(() => {}); });
   push();          // a notes window that asked before the engine was ready gets its notes now
+  // Start at login is on unless it was turned off; the entry is (re)written so it points at this copy of the app.
+  if ((await loadSettings()).startAtLogin) invoke("autostart_set", { on: true }).catch(() => {});
 }

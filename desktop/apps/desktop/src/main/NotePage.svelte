@@ -5,7 +5,11 @@
   import Icon from "../lib/Icon.svelte";
   import Sheet, { type SheetItem } from "../lib/Sheet.svelte";
   import AaPanel from "./AaPanel.svelte";
+  import AiTitles from "../lib/AiTitles.svelte";
+  import FormatIcon from "../lib/editor/FormatIcon.svelte";
   import { notes } from "../lib/notes";
+  import { aiConfigured, categorize, formatMarkdown } from "../lib/ai";
+  import { settings } from "../lib/settings";
 
   /** The full note screen (NoteActivity on the phone), with autosave. A change from elsewhere shows unless you are mid-edit. */
   interface Props { note: Note; categories: string[]; vaultSetUp: boolean; onback: () => void; ondelete: (n: Note) => void }
@@ -29,6 +33,15 @@
   let sheet: { title: string; message?: string; items?: SheetItem[]; field?: { label: string; value: string; max?: number }; confirm?: { label: string; danger?: boolean; run: (v: string) => void } } | null = $state(null);
   let toast: { text: string; timer: ReturnType<typeof setTimeout> } | null = $state(null);
   let titleEl: HTMLTextAreaElement;
+  let titles: AiTitles = $state()!;
+  /** The quiet category offer under the title: asked at most once per note, never for secret notes. */
+  let offer = $state("");
+  let offered = false;
+  let offerTimer: ReturnType<typeof setTimeout> | undefined, hideOffer: ReturnType<typeof setTimeout> | undefined;
+  /** The AI formatting chip: what it is doing, or what it did (with Undo). */
+  let aiChip: { text: string; accent: boolean; tap?: () => void } | null = $state(null);
+  let aiTimer: ReturnType<typeof setTimeout> | undefined;
+  let aiBusy = false;
 
   function say(text: string) {
     if (toast) clearTimeout(toast.timer);
@@ -53,7 +66,62 @@
     base = c;
     notes.save(c);
   }
-  const typed = () => { clearTimeout(timer); timer = setTimeout(save, 500); };
+  const typed = () => {
+    clearTimeout(timer); timer = setTimeout(save, 500);
+    clearTimeout(offerTimer); offerTimer = setTimeout(offerCategory, 3000);
+  };
+
+  // ---- AI ----
+
+  const noteText = () => `${title}\n${editor.markdown()}`.trim();
+
+  function showAi(text: string, accent: boolean, tap?: () => void, hideAfter = 0) {
+    clearTimeout(aiTimer);
+    aiChip = { text, accent, tap };
+    if (hideAfter) aiTimer = setTimeout(() => (aiChip = null), hideAfter);
+  }
+  /** Headings, lists, bold, tables… added to the note without changing a single word. */
+  async function formatWithAi() {
+    if (aiBusy) return;
+    if (!(await aiConfigured())) { say("Add your OpenRouter key in Settings first"); return; }
+    if (secret) { say("AI is off for secret notes"); return; }
+    const before = editor.markdown();
+    if (!before.trim()) { say("Write something first"); return; }
+    if (before.length > 8000) { say("This note is too long to format in one go"); return; }
+    aiBusy = true;
+    showAi("✨ Formatting…", true);
+    try {
+      const md = await formatMarkdown(before);
+      if (editor.markdown() !== before) showAi("You kept typing, so nothing was changed", false, undefined, 5000);
+      else {
+        editor.load(md); save();
+        showAi("✓ Formatted  ·  Undo", true, () => { editor.load(before); save(); showAi("Back to how it was", false, undefined, 3000); }, 12000);
+      }
+    } catch (e) {
+      showAi((e as Error).message || "Couldn't format this note", false, () => (aiChip = null), 60000);    // stays so you can read it
+    } finally { aiBusy = false; }
+  }
+  async function offerCategory() {
+    if (offered || secret || category || !settings().suggestCategories || noteText().length < 25 || !(await aiConfigured())) return;
+    offered = true;
+    try {
+      const name = (await categorize([noteText()], categories)).get(0);
+      if (!name || secret || category) return;
+      offer = canonicalCategory(cleanCategory(name), categories);
+      clearTimeout(hideOffer); hideOffer = setTimeout(() => (offer = ""), 15000);
+    } catch { /* a quiet offer: no offer */ }
+  }
+  async function suggestCategory() {
+    if (!(await aiConfigured())) { say("Add your OpenRouter key in Settings first"); return; }
+    if (!noteText()) { say("Write something first"); return; }
+    say("Thinking…");
+    try {
+      const name = (await categorize([noteText()], categories)).get(0);
+      const c = name ? canonicalCategory(cleanCategory(name), categories) : "";
+      if (!c) { say("No suggestion"); return; }
+      category = c; save(); say(`Filed under ${c}`);
+    } catch (e) { say((e as Error).message || "No suggestion"); }
+  }
 
   function load(n: Note) {
     base = { ...n };
@@ -86,7 +154,8 @@
 
   function pickCategory() {
     const items: SheetItem[] = categories.map((c) => ({ label: c, checked: c === category, run: () => { category = c; save(); } }));
-    items.push({ label: "New category…", accent: true, run: () => setTimeout(newCategory) });
+    items.push({ label: "＋  New category", accent: true, run: () => setTimeout(newCategory) });
+    items.push({ label: "✦  Suggest with AI", accent: true, run: () => void suggestCategory() });
     if (category) items.push({ label: "No category", run: () => { category = ""; save(); } });
     sheet = { title: "Category", items };
   }
@@ -132,6 +201,7 @@
   <div class="top">
     <button class="icon text" onclick={back} title="Back (Esc)" aria-label="Back"><Icon name="back" size={26} /></button>
     <span class="grow"></span>
+    <button class="icon" onclick={formatWithAi} title="Format with AI" aria-label="Format with AI"><FormatIcon kind="ai" tint="var(--accent)" /></button>
     <button class="icon accent" class:on={panel} onclick={() => (panel = !panel)} title="Format" aria-label="Format" aria-pressed={panel}><Icon name="format" size={26} /></button>
     <button class="icon" class:accent={secret} onclick={toggleSecret} title="Secret note" aria-label="Secret note" aria-pressed={secret}><Icon name="lock" size={26} /></button>
     <button class="icon" class:accent={pinned} onclick={togglePin} title={pinned ? "Unpin" : "Pin"} aria-label="Pin" aria-pressed={pinned}><Icon name="pin" size={26} /></button>
@@ -144,9 +214,23 @@
     <button class="pill" class:set={!!category} onclick={pickCategory} dir="auto">{category || "＋ Category"}</button>
   {/if}
   <div class="editor">
-    <textarea class="title" bind:this={titleEl} bind:value={title} oninput={() => { fitTitle(); typed(); }} placeholder="Title" dir="auto" rows="1" spellcheck="false"
-      onkeydown={(e) => { if (e.key === "Enter") { e.preventDefault(); editor.focus(); } }}></textarea>
+    <div class="titlerow">
+      <textarea class="title" bind:this={titleEl} bind:value={title} oninput={() => { fitTitle(); typed(); }} placeholder="Title" dir="auto" rows="1" spellcheck="false"
+        onkeydown={(e) => { if (e.key === "Enter") { e.preventDefault(); editor.focus(); } }}></textarea>
+      <button class="sparkle" onclick={() => titles.suggest(editor.markdown(), base.images[0], secret)} title="Suggest a title" aria-label="Suggest a title"><Icon name="sparkle" size={20} /></button>
+    </div>
     <div class="rule"></div>
+    <AiTitles bind:this={titles} onpick={(t) => { title = t; requestAnimationFrame(fitTitle); save(); }} onmessage={say} />
+    {#if offer}
+      <button class="offer" dir="auto" onclick={() => { clearTimeout(hideOffer); category = offer; offer = ""; save(); }}>✦ {offer}</button>
+    {/if}
+    {#if aiChip}
+      {#if aiChip.tap}
+        <button class="aichip" class:accent={aiChip.accent} onclick={aiChip.tap}>{aiChip.text}</button>
+      {:else}
+        <span class="aichip" class:accent={aiChip.accent}>{aiChip.text}</span>
+      {/if}
+    {/if}
     <RichEditor bind:this={editor} class="body" placeholder="Start typing…" onchange={typed} onselect={() => version++} />
   </div>
 </div>
@@ -183,6 +267,21 @@
     unicode-bidi: plaintext; text-align: start;
   }
   .title::placeholder { color: var(--secondary); }
+  .titlerow { flex: none; display: flex; align-items: center; }
+  .titlerow .title { flex: 1; min-width: 0; }
+  .sparkle {
+    flex: none; width: 38px; height: 38px; border: 0; border-radius: 19px; display: grid; place-items: center; background: transparent;
+    color: var(--accent); cursor: pointer; transition: transform 150ms;
+  }
+  .sparkle:active { transform: scale(0.85); }
+  .offer, .aichip {
+    flex: none; align-self: flex-start; margin: 6px 0 0 4px; border: 0; font: inherit; font-size: 13px; border-radius: 14px;
+    background: color-mix(in srgb, var(--secondary) 15%, transparent); color: var(--secondary);
+  }
+  .offer { height: 28px; padding: 0 12px; background: color-mix(in srgb, var(--accent) 15%, transparent); color: var(--accent); cursor: pointer; }
+  .aichip { padding: 6px 12px; border-radius: 16px; max-width: 100%; text-align: start; }
+  .aichip.accent { background: color-mix(in srgb, var(--accent) 15%, transparent); color: var(--accent); }
+  button.aichip { cursor: pointer; }
   .rule { flex: none; height: 1px; margin: 0 4px; background: var(--hairline); }
   .editor :global(.body) { flex: 1; min-height: 0; }
   .editor :global(.body .rich) { padding: 8px 4px 40vh; font-size: 17px; }

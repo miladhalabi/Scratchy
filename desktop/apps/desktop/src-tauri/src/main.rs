@@ -202,6 +202,81 @@ fn secret_delete(name: String) -> Result<(), String> {
     }
 }
 
+/// The desktop's accent color, like the phone's wallpaper color: the Omarchy theme's accent, else GNOME's
+/// accent setting. None when the desktop has no accent of its own.
+#[tauri::command]
+fn system_accent() -> Option<String> {
+    #[cfg(target_os = "linux")]
+    {
+        let home = std::env::var("HOME").ok()?;
+        if let Ok(t) = fs::read_to_string(format!("{home}/.config/omarchy/current/theme/colors.toml")) {
+            for line in t.lines() {
+                if let Some(v) = line.trim().strip_prefix("accent") {
+                    let v = v.trim_start().strip_prefix('=')?.trim().trim_matches('"');
+                    if v.len() == 7 && v.starts_with('#') { return Some(v.to_lowercase()); }
+                }
+            }
+        }
+        if std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_default().contains("GNOME") {
+            let out = std::process::Command::new("gsettings").args(["get", "org.gnome.desktop.interface", "accent-color"]).output().ok()?;
+            let name = String::from_utf8_lossy(&out.stdout).trim().trim_matches('\'').to_string();
+            // GNOME's own accent palette.
+            let hex = match name.as_str() {
+                "blue" => "#3584e4", "teal" => "#2190a4", "green" => "#3a944a", "yellow" => "#c88800", "orange" => "#ed5b00",
+                "red" => "#e62d42", "pink" => "#d56199", "purple" => "#9141ac", "slate" => "#6f8396", _ => return None,
+            };
+            return Some(hex.into());
+        }
+        None
+    }
+    #[cfg(not(target_os = "linux"))]
+    { None }
+}
+
+/// The small program the desktop's shortcut runs (it sits next to this one), for the line Settings shows.
+#[tauri::command]
+fn toggle_path() -> String {
+    let exe = std::env::current_exe().unwrap_or_default();
+    exe.with_file_name(if cfg!(windows) { "scratchy-toggle.exe" } else { "scratchy-toggle" }).to_string_lossy().into_owned()
+}
+
+/// Start at login, the XDG way (uwsm and most desktops run ~/.config/autostart). Quiet: it starts in the tray.
+#[cfg(target_os = "linux")]
+fn autostart_file() -> Option<PathBuf> {
+    let base = std::env::var("XDG_CONFIG_HOME").ok().filter(|v| !v.is_empty())
+        .or_else(|| std::env::var("HOME").ok().map(|h| format!("{h}/.config")))?;
+    Some(PathBuf::from(base).join("autostart").join("scratchy.desktop"))
+}
+
+#[tauri::command]
+fn autostart_get() -> bool {
+    #[cfg(target_os = "linux")]
+    { autostart_file().is_some_and(|f| f.exists()) }
+    #[cfg(not(target_os = "linux"))]
+    { false }
+}
+
+#[tauri::command]
+fn autostart_set(on: bool) -> Result<(), String> {
+    #[cfg(target_os = "linux")]
+    {
+        let f = autostart_file().ok_or("no home folder")?;
+        if !on { let _ = fs::remove_file(&f); return Ok(()); }
+        let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+        // A build run from the project needs the same libraries it was started with.
+        let mut env = String::new();
+        for k in ["LD_PRELOAD", "LD_LIBRARY_PATH"] {
+            if let Ok(v) = std::env::var(k) { if !v.is_empty() { env += &format!("{k}={v} "); } }
+        }
+        let exec = if env.is_empty() { format!("\"{}\" --background", exe.display()) } else { format!("env {env}\"{}\" --background", exe.display()) };
+        fs::create_dir_all(f.parent().unwrap()).map_err(|e| e.to_string())?;
+        let text = format!("[Desktop Entry]\nType=Application\nName=Scratchy\nComment=Quick notes\nExec={exec}\nTerminal=false\nX-GNOME-Autostart-enabled=true\n");
+        write_atomic(f, text.as_bytes())
+    }
+    #[cfg(not(target_os = "linux"))]
+    { let _ = on; Ok(()) }
+}
+
 #[tauri::command]
 fn data_path(app: AppHandle) -> Result<String, String> {
     Ok(dir(&app, None)?.to_string_lossy().into_owned())
@@ -258,7 +333,7 @@ fn main() {
     b.plugin(tauri_plugin_http::init())
         .manage(Oauth(Mutex::new(None)))
         .invoke_handler(tauri::generate_handler![
-            read_text, write_text, remove_text, read_attachment, write_attachment, has_attachment, data_path,
+            read_text, write_text, remove_text, read_attachment, write_attachment, has_attachment, data_path, system_accent, toggle_path, autostart_get, autostart_set,
             google_client, oauth_start, oauth_wait, open_url, secret_get, secret_set, secret_delete,
             card_hide, card_input, card_keyboard, card_boot, show_main, log
         ])

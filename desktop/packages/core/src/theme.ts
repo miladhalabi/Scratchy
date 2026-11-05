@@ -34,7 +34,7 @@ export const contrast = (a: string, b: string) => {
 /** White or near-black, whichever stands out more against `bg`. */
 export const onColor = (bg: string) => (contrast("#ffffff", bg) >= contrast("#101114", bg) ? "#ffffff" : "#101114");
 
-export const themeNames = ["blue", "orange", "teal", "green", "purple"] as const;
+export const themeNames = ["system", "orange", "blue", "teal", "green", "purple"] as const;
 export type ThemeName = (typeof themeNames)[number];
 
 /** Accent for a fixed theme: [light mode, dark mode]. */
@@ -64,4 +64,26 @@ export function fixedColors(name: string, dark: boolean): Colors {
     danger: dark ? "#ff6b63" : "#d93025",
     success: dark ? "#5dd58b" : "#1e8e3e",
   };
+}
+
+const hex = (r: number, g: number, b: number) => "#" + [r, g, b].map((v) => Math.round(Math.max(0, Math.min(255, v))).toString(16).padStart(2, "0")).join("");
+const mix = (a: string, b: string, t: number) => { const x = rgb(a), y = rgb(b); return hex(x[0] + (y[0] - x[0]) * t, x[1] + (y[1] - x[1]) * t, x[2] + (y[2] - x[2]) * t); };
+
+/**
+ * One system accent color (the desktop's version of the phone's wallpaper color) made readable in both modes:
+ * darkened until text in it reads on white, lightened until it reads on the dark background.
+ */
+export function readableAccent(color: string, dark: boolean): string {
+  const bg = dark ? "#0f1013" : "#ffffff", toward = dark ? "#ffffff" : "#000000";
+  let c = color.toLowerCase();
+  for (let i = 1; i <= 20 && contrast(c, bg) < 4.5; i++) c = mix(color, toward, i * 0.05);
+  return c;
+}
+
+/** The neutral set with an accent from the system (`name` "system"), or a fixed accent. */
+export function themeColors(name: string, dark: boolean, systemAccent: string | null): Colors {
+  if (name !== "system" || !systemAccent || !/^#[0-9a-f]{6}$/i.test(systemAccent)) return fixedColors(name === "system" ? "blue" : name, dark);
+  const base = fixedColors("blue", dark);
+  const accent = readableAccent(systemAccent, dark);
+  return { ...base, accent, onAccent: onColor(accent), accentInverse: readableAccent(systemAccent, !dark), accentContainer: accent + "2e" };
 }

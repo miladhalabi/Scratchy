@@ -26,3 +26,16 @@ describe("themes", () => {
     expect(onColor("#ffab40")).toBe("#101114");
   });
 });
+
+describe("system accent", () => {
+  it("is made readable on both backgrounds, and a readable one is kept as it is", async () => {
+    const { readableAccent, themeColors, contrast } = await import("../src");
+    for (const dark of [false, true]) {
+      const a = readableAccent("#e68e0d", dark);
+      expect(contrast(a, dark ? "#0f1013" : "#ffffff")).toBeGreaterThanOrEqual(4.5);
+    }
+    expect(readableAccent("#1a5fd0", false)).toBe("#1a5fd0");
+    expect(themeColors("system", true, null).accent).toBe("#8ab4ff");          // no system color: the phone's blue
+    expect(themeColors("teal", false, "#e68e0d").accent).toBe("#00796b");     // a fixed choice ignores it
+  });
+});

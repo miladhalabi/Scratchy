@@ -9,7 +9,8 @@
       "allow": [
         { "url": "https://www.googleapis.com/*" },
         { "url": "https://oauth2.googleapis.com/*" },
-        { "url": "https://scratchy-sync.halabimilad.workers.dev/*" }
+        { "url": "https://scratchy-sync.halabimilad.workers.dev/*" },
+        { "url": "https://openrouter.ai/*" }
       ]
     }
   ]

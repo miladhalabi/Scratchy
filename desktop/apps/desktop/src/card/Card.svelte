@@ -2,10 +2,12 @@
   import { flushSync, onMount } from "svelte";
   import { invoke } from "@tauri-apps/api/core";
   import { listen } from "@tauri-apps/api/event";
-  import { canonical, fixedColors, newNote, pickCardNote, type Note } from "@scratchy/core";
+  import { canonical, newNote, pickCardNote, themeColors, type Note } from "@scratchy/core";
+  import { applyTheme } from "../lib/theme";
   import RichEditor from "../lib/editor/RichEditor.svelte";
   import { setLines } from "../lib/editor/schema";
   import Icon from "../lib/Icon.svelte";
+  import AiTitles from "../lib/AiTitles.svelte";
   import { cardHeading } from "../lib/preview";
   import { formatWhen } from "../main/when";
   import "../lib/base.css";
@@ -33,15 +35,18 @@
   let root: HTMLDivElement;
   let cardEl: HTMLDivElement;
   let editor: RichEditor;
+  let titles: AiTitles | undefined = $state();
+  let aiNote = $state("");
+  let aiNoteTimer: ReturnType<typeof setTimeout> | undefined;
+  const aiSay = (t: string) => { clearTimeout(aiNoteTimer); aiNote = t; aiNoteTimer = setTimeout(() => (aiNote = ""), 4000); };
 
   // Where the card is drawn. Plain numbers, written straight to the style: no re-render per frame.
   let x = 0, y = 0, w = 400, h = 460;
   const sx = new Spring(0), sy = new Spring(0);
   let springing = false;
 
-  const dark = matchMedia("(prefers-color-scheme: dark)");
-  let colors = $state(fixedColors("blue", dark.matches));
-  dark.addEventListener("change", () => { colors = fixedColors("blue", dark.matches); });
+  let colors = $state(themeColors("system", false, null));
+  const refreshAccent = applyTheme((c) => { colors = c; });
 
   // Until the surface has been shown once, the page doesn't know its real size yet: use the screen's.
   let sized = false;
@@ -92,11 +97,12 @@
   function pick() {
     const p = pickCardNote(store.all(), prefs, Date.now(), () => crypto.randomUUID());
     note = p.note;
+    titles?.hide(); aiNote = "";
     if (p.create) { store.save(p.note).then((n) => { note = n; prefs.scratchId = n.id; saveCard(prefs); }); }
     title = note.title;
     canon = canonical(note.body);
     editor.load(note.body);
-    continuing = p.create || (!note.title && !note.body) ? null : note;
+    continuing = p.existing && !p.create && (note.title || note.body) ? note : null;
     recents = null;
   }
 
@@ -104,6 +110,7 @@
   function show(n: Note | null) {
     save();
     note = n ?? newNote(crypto.randomUUID());
+    titles?.hide(); aiNote = "";
     title = note.title;
     canon = canonical(note.body);
     editor.load(note.body);
@@ -183,6 +190,7 @@
     phase = "opening";
     if (!reverse) { pick(); flushSync(); fit(); place(); }
     syncIfStale();
+    void refreshAccent();
     invoke("card_keyboard", { exclusive: !pinned }).catch(() => {});
     syncInput();
 
@@ -372,6 +380,12 @@
       pick(); flushSync(); fit(); place();
       if (prefs.anim === "genie") stripsFor().hide();
       off = await listen("card-toggle", toggle);
+      // Settings changed one of the card's own options (opens on, animation, speed).
+      await listen<Partial<CardState>>("card-prefs", ({ payload }) => {
+        Object.assign(prefs, payload);
+        saveCard(prefs);
+        if (payload.anim && payload.anim !== "genie") { genie?.clear(); genie = null; }
+      });
       invoke("card_boot").catch(() => {});
     })();
     window.addEventListener("keydown", keys);
@@ -380,10 +394,7 @@
 </script>
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
-<div class="root" bind:this={root} onpointerdown={outside}
-  style:--accent={colors.accent} style:--on-accent={colors.onAccent} style:--floating={colors.floating}
-  style:--text={colors.text} style:--secondary={colors.secondary} style:--hairline={colors.hairline}
-  style:--wash={colors.accentContainer}>
+<div class="root" bind:this={root} onpointerdown={outside}>
   <div class="card" bind:this={cardEl}>
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div class="head" onpointerdown={dragStart} onpointermove={dragMove} onpointerup={dragEnd} onpointercancel={dragEnd}>
@@ -400,9 +411,15 @@
     {/if}
     <div class="content">
       <div class="ed" class:gone={!!recents}>
-        <input class="title" placeholder="Title" bind:value={title} oninput={typed} dir="auto" spellcheck="false"
-          onkeydown={(e) => { if (e.key === "Enter") { e.preventDefault(); editor.focus(); } }} />
+        <div class="titlerow">
+          <input class="title" placeholder="Title" bind:value={title} oninput={typed} dir="auto" spellcheck="false"
+            onkeydown={(e) => { if (e.key === "Enter") { e.preventDefault(); editor.focus(); } }} />
+          <button class="icon sparkle" title="Suggest a title" aria-label="Suggest a title"
+            onclick={() => titles?.suggest(editor.markdown(), note?.images[0], !!note?.secret)}><Icon name="sparkle" size={18} /></button>
+        </div>
         <div class="rule"></div>
+        <AiTitles bind:this={titles} onpick={(t) => { title = t; typed(); }} onmessage={aiSay} />
+        {#if aiNote}<span class="ainote">{aiNote}</span>{/if}
         <RichEditor bind:this={editor} class="body" placeholder="Start typing…" onchange={typed} />
       </div>
       {#if recents}
@@ -466,6 +483,10 @@
     font-size: 18px; font-weight: 700; padding: 8px 4px 4px; unicode-bidi: plaintext; text-align: start;
   }
   .title::placeholder { color: var(--secondary); }
+  .titlerow { flex: none; display: flex; align-items: center; }
+  .titlerow .title { flex: 1; min-width: 0; }
+  .icon.sparkle, .icon.sparkle:hover { color: var(--accent); }
+  .ainote { flex: none; font-size: 12px; color: var(--secondary); padding: 6px 4px 0; }
   .rule { flex: none; height: 1px; margin: 0 4px; background: var(--hairline); }
   .rule.full { margin: 0; }
   .card :global(.body) { flex: 1; min-height: 0; }
