@@ -42,10 +42,21 @@ function line(l: Line, all: Line[], i: number): string {
   }
 }
 
-/** Markdown rendered for reading, at most `maxChars` of it (the phone takes 1500). */
+/**
+ * Markdown rendered for reading, at most `maxChars` of it (the phone takes 1500). Remembered by its text: the
+ * notes list draws every card again after each sync, and almost all of them are unchanged.
+ */
+const rendered = new Map<string, string>();
 export function render(md: string, maxChars = 1500): string {
-  const all = parse(md.slice(0, maxChars));
-  return all.map((l, i) => line(l, all, i)).join("\n");
+  const text = md.slice(0, maxChars);
+  let html = rendered.get(text);
+  if (html === undefined) {
+    const all = parse(text);
+    html = all.map((l, i) => line(l, all, i)).join("\n");
+    if (rendered.size >= 1000) rendered.delete(rendered.keys().next().value!);   // the oldest goes first
+    rendered.set(text, html);
+  }
+  return html;
 }
 
 /** The text under the heading: the whole body, or without its first line when that line is the heading. */

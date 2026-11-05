@@ -394,6 +394,24 @@ fn main() {
         }));
     }
     b.plugin(tauri_plugin_http::init())
+        // att://localhost/<name>: the note images, read by the page straight from disk (no base64 round trip).
+        .register_asynchronous_uri_scheme_protocol("att", |ctx, request, responder| {
+            let app = ctx.app_handle().clone();
+            let name = request.uri().path().trim_start_matches('/').to_string();
+            std::thread::spawn(move || {
+                let res = (|| {
+                    safe(&name).ok()?;
+                    let bytes = fs::read(dir(&app, Some("attachments")).ok()?.join(&name)).ok()?;
+                    let mime = if name.ends_with(".png") { "image/png" } else if name.ends_with(".webp") { "image/webp" } else { "image/jpeg" };
+                    tauri::http::Response::builder()
+                        .header("Content-Type", mime)
+                        .header("Cache-Control", "max-age=31536000, immutable")     // names never get new contents
+                        .header("Access-Control-Allow-Origin", "*")
+                        .body(bytes).ok()
+                })();
+                responder.respond(res.unwrap_or_else(|| tauri::http::Response::builder().status(404).body(Vec::new()).unwrap()));
+            });
+        })
         .manage(Oauth(Mutex::new(None)))
         .invoke_handler(tauri::generate_handler![
             read_text, write_text, remove_text, read_attachment, write_attachment, has_attachment, data_path, system_accent, toggle_path, autostart_get, autostart_set,

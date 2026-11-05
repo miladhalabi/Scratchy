@@ -18,7 +18,7 @@
           <span class="wait"></span>
         {:then src}
           {#if src}
-            <button class="open" onclick={() => onopen(name)} aria-label="Open image"><img {src} alt="In note" draggable="false" /></button>
+            <button class="open" onclick={() => onopen(name)} aria-label="Open image"><img {src} alt="In note" draggable="false" decoding="async" /></button>
           {:else}
             <span class="wait" title="Not here yet"></span>
           {/if}

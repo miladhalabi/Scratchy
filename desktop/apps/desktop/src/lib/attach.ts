@@ -44,15 +44,17 @@ export const readClipboard = () => invoke<Clip>("clipboard_read");
 export const clipBlob = (c: { mime: string; b64: string }) =>
   new Blob([Uint8Array.from(atob(c.b64), (ch) => ch.charCodeAt(0))], { type: c.mime });
 
-/** Object URLs for attachments, shared by every view that shows the same image. */
-const urls = new Map<string, Promise<string | null>>();
+/** Where the page loads an attachment from: read straight from disk by the app (att:// on Linux and Mac). */
+const base = navigator.userAgent.includes("Windows") ? "http://att.localhost/" : "att://localhost/";
+
+/** The address of an image that is here, or null while it isn't (it may still be syncing). */
+const known = new Map<string, Promise<string | null>>();
 export function imageUrl(name: string): Promise<string | null> {
-  let u = urls.get(name);
+  let u = known.get(name);
   if (!u) {
-    u = files.readAttachment(name).then((b64) => (b64 ? URL.createObjectURL(clipBlob({ mime: name.endsWith(".png") ? "image/png" : "image/jpeg", b64 })) : null))
-      .catch(() => null);
-    u.then((v) => { if (!v) urls.delete(name); });            // not here yet (it may still be syncing): try again next time
-    urls.set(name, u);
+    u = files.hasAttachment(name).then((has) => (has ? base + encodeURIComponent(name) : null)).catch(() => null);
+    u.then((v) => { if (!v) known.delete(name); });           // not here yet: ask again next time
+    known.set(name, u);
   }
   return u;
 }

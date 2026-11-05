@@ -6,7 +6,7 @@
 </script>
 
 {#await imageUrl(name) then src}
-  {#if src}<img {src} alt="" draggable="false" />{/if}
+  {#if src}<img {src} alt="" draggable="false" decoding="async" loading="lazy" />{/if}
 {/await}
 
 <style>
