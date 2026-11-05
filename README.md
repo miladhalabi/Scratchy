@@ -101,6 +101,20 @@ Plain Kotlin and Android Views, no Compose and no XML layouts. The merge engine 
 - AI features send only the note you asked about (or the notes being sorted), only when you tap, to OpenRouter, with a key you paste in yourself.
 - If you forget the vault password, the synced copy cannot be recovered. There is no reset.
 
+## 🖥️ On your computer too
+
+Scratchy has a desktop app (Linux first; Windows and Mac are planned). It is the same idea: a shortcut opens a note card over whatever you are doing, even a fullscreen video, and it syncs with the phone in about a second.
+
+- ⌨️ **Super+Alt+N from anywhere** opens the card, or the tray icon does. Esc, a click beside it, or the shortcut again closes it. Pin it to keep it on screen while you use other apps.
+- 🧞 **The same card.** Genie, slide (with or without a fade) or no animation, at the speed you like. Drag it anywhere, resize it from any edge, zoom its text with Ctrl+= and Ctrl+-. Make it see-through, with the blur only under the card on Hyprland.
+- 🗒️ **A notes window like the phone's.** The grid, search, category chips, the full editor with the Aa panel and tables, images (paste, drop or the Paste button), and a viewer that saves an image to Downloads.
+- 📸 **Screenshots land in notes.** Take one with your desktop's screenshot tool (or copy any image) and the tray icon turns green; open the card and choose where it goes.
+- 🔄 **Sync and the vault work exactly as on the phone:** the same Google Drive folder, the same encryption, the same password. Secret notes open with Ctrl+Shift+L in the notes window.
+- ✨ **The AI features** use your own OpenRouter key, kept in the system keyring.
+- 🎨 **Your desktop's accent color**, light and dark following the system, and it starts at login into the tray.
+
+Built with Tauri, Svelte and TypeScript, in [`desktop/`](desktop).
+
 ## 📲 Install
 
 Not on the Play Store. Build it and install it over USB (JDK 17+, Android SDK, a phone with USB debugging):
@@ -111,5 +125,25 @@ adb install -r app/build/outputs/apk/release/app-release.apk
 ```
 
 On first run, allow "Display over other apps" and photo access, then switch the edge bar on from the notes screen. Sync needs a free Google Cloud project, and the instant updates need a free Cloudflare Worker. The steps are in the [developer notes](docs/DEVELOPMENT.md#setting-up-sync).
+
+### 🖥️ Desktop (Arch Linux)
+
+Build the package from this checkout and install it (Rust, Node.js and pnpm needed):
+
+```bash
+cd desktop
+pnpm install
+cd packaging/arch
+makepkg -f
+sudo pacman -U scratchy-*.pkg.tar.zst
+```
+
+For sync, put the Google desktop client in `desktop/.env.local` before building (`GOOGLE_CLIENT_ID=…` and `GOOGLE_CLIENT_SECRET=…`, the same Google Cloud project as the phone). Then start **Scratchy** from your launcher and add the shortcut to Hyprland (Settings in the app shows the line, with a Copy button):
+
+```
+bind = SUPER ALT, N, exec, scratchy-toggle
+```
+
+The card is a layer-shell surface, so it shows over fullscreen apps. It is tested on Hyprland (Omarchy); Sway and KDE should work as they have layer-shell too, GNOME isn't supported yet.
 
 Kotlin, plain Android Views, Android 8.0 and up. How it works inside is in [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md).

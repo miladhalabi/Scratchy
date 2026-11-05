@@ -1,0 +1,39 @@
+# Scratchy for Arch Linux, built from this checkout (not from a download).
+#   cd desktop/packaging/arch && makepkg -f && sudo pacman -U scratchy-*.pkg.tar.zst
+# Put GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in desktop/.env.local first to build sync in.
+
+pkgname=scratchy
+pkgver=0.0.1
+pkgrel=1
+pkgdesc="Quick notes that open over whatever you are doing, synced with the Android app"
+arch=('x86_64')
+url="https://github.com/miladhalabi/Scratchy"
+license=('LicenseRef-unknown')
+depends=('webkit2gtk-4.1' 'gtk3' 'gtk-layer-shell' 'libayatana-appindicator' 'wl-clipboard' 'xdg-user-dirs')
+makedepends=('cargo' 'nodejs' 'pnpm')
+optdepends=('hyprland: the card over fullscreen apps, blur behind it')
+options=('!lto' '!debug')
+
+_root="$startdir/../.."            # desktop/
+
+build() {
+  cd "$_root"
+  if [ -f .env.local ]; then set -a; . ./.env.local; set +a; fi
+  pnpm install --offline --frozen-lockfile
+  pnpm --filter @scratchy/desktop build
+  cargo build --release --offline -p scratchy-desktop
+}
+
+package() {
+  cd "$_root"
+  install -Dm755 target/release/scratchy-desktop "$pkgdir/usr/lib/scratchy/scratchy-desktop"
+  install -Dm755 target/release/scratchy-toggle "$pkgdir/usr/bin/scratchy-toggle"
+  install -Dm755 packaging/arch/scratchy "$pkgdir/usr/bin/scratchy"
+  install -Dm644 packaging/arch/scratchy.desktop "$pkgdir/usr/share/applications/scratchy.desktop"
+  install -Dm644 apps/desktop/src-tauri/icons/icon.png "$pkgdir/usr/share/icons/hicolor/256x256/apps/scratchy.png"
+  # The libjxl 0.12 fallback (see /usr/bin/scratchy), when this checkout has it.
+  if [ -d .libjxl12 ]; then
+    install -d "$pkgdir/usr/lib/scratchy/lib"
+    cp -a .libjxl12/libjxl*.so* "$pkgdir/usr/lib/scratchy/lib/"
+  fi
+}

@@ -1,0 +1,10 @@
+#!/bin/sh
+# Starts Scratchy. gtk-layer-shell must be loaded before GTK starts, for the card's overlay surface (the app
+# drops it again for the helpers it starts).
+export LD_PRELOAD="/usr/lib/libgtk-layer-shell.so${LD_PRELOAD:+:$LD_PRELOAD}"
+# The package carries a copy of libjxl 0.12 for systems whose WebKit wants it before pacman -Syu brought it.
+# It is only used while the system's own copy is missing.
+if [ ! -e /usr/lib/libjxl.so.0.12 ] && [ -d /usr/lib/scratchy/lib ]; then
+  export LD_LIBRARY_PATH="/usr/lib/scratchy/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+fi
+exec /usr/lib/scratchy/scratchy-desktop "$@"

@@ -1,0 +1,16 @@
+[Desktop Entry]
+Type=Application
+Name=Scratchy
+GenericName=Quick notes
+Comment=Notes that open over whatever you are doing, synced with your phone
+Exec=scratchy
+Icon=scratchy
+Terminal=false
+Categories=Utility;TextEditor;
+Keywords=notes;scratch;memo;
+StartupWMClass=scratchy-desktop
+Actions=card;
+
+[Desktop Action card]
+Name=Open the card
+Exec=scratchy-toggle

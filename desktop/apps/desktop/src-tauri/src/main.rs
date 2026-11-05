@@ -243,6 +243,7 @@ async fn system_accent() -> Option<String> {
 /// The small program the desktop's shortcut runs (it sits next to this one), for the line Settings shows.
 #[tauri::command]
 async fn toggle_path() -> String {
+    if installed() { return "scratchy-toggle".into() }                 // on the PATH
     let exe = std::env::current_exe().unwrap_or_default();
     exe.with_file_name(if cfg!(windows) { "scratchy-toggle.exe" } else { "scratchy-toggle" }).to_string_lossy().into_owned()
 }
@@ -270,12 +271,13 @@ async fn autostart_set(on: bool) -> Result<(), String> {
         let f = autostart_file().ok_or("no home folder")?;
         if !on { let _ = fs::remove_file(&f); return Ok(()); }
         let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-        // A build run from the project needs the same libraries it was started with.
-        let mut env = String::new();
-        for k in ["LD_PRELOAD", "LD_LIBRARY_PATH"] {
-            if let Ok(v) = std::env::var(k) { if !v.is_empty() { env += &format!("{k}={v} "); } }
-        }
-        let exec = if env.is_empty() { format!("\"{}\" --background", exe.display()) } else { format!("env {env}\"{}\" --background", exe.display()) };
+        // Installed: the `scratchy` command sets everything up. A build run from the project needs the same
+        // libraries it was started with.
+        let exec = if installed() { "scratchy --background".to_string() } else {
+            let mut env = String::new();
+            for (k, v) in launch_env() { env += &format!("{k}={v} "); }
+            if env.is_empty() { format!("\"{}\" --background", exe.display()) } else { format!("env {env}\"{}\" --background", exe.display()) }
+        };
         fs::create_dir_all(f.parent().unwrap()).map_err(|e| e.to_string())?;
         let text = format!("[Desktop Entry]\nType=Application\nName=Scratchy\nComment=Quick notes\nExec={exec}\nTerminal=false\nX-GNOME-Autostart-enabled=true\n");
         write_atomic(f, text.as_bytes())
@@ -381,7 +383,21 @@ fn set_zoom(window: tauri::WebviewWindow, factor: f64) -> Result<(), String> {
 #[tauri::command]
 async fn log(line: String) { eprintln!("[page] {line}"); }
 
+/// Installed by the package (/usr/lib/scratchy, started through /usr/bin/scratchy), not a build in the project.
+fn installed() -> bool {
+    std::env::current_exe().is_ok_and(|e| e.starts_with("/usr/lib/scratchy"))
+}
+
+/// LD_PRELOAD and LD_LIBRARY_PATH as the app was started (for the autostart entry of a project build).
+static LAUNCH_ENV: std::sync::OnceLock<Vec<(String, String)>> = std::sync::OnceLock::new();
+fn launch_env() -> &'static [(String, String)] { LAUNCH_ENV.get().map(|v| v.as_slice()).unwrap_or(&[]) }
+
 fn main() {
+    let _ = LAUNCH_ENV.set(["LD_PRELOAD", "LD_LIBRARY_PATH"].iter()
+        .filter_map(|k| std::env::var(k).ok().filter(|v| !v.is_empty()).map(|v| (k.to_string(), v))).collect());
+    // gtk-layer-shell is preloaded for this process only: the helpers it starts (wl-paste, hyprctl…) don't
+    // need GTK loaded into them. Nothing else runs yet, so changing the environment is safe here.
+    std::env::remove_var("LD_PRELOAD");
     let args: Vec<String> = std::env::args().collect();
     let toggle = args.iter().any(|a| a == "--toggle");
     // Started at login: stay in the background until the shortcut or the tray is used.
