@@ -3,10 +3,30 @@
   "productName": "Scratchy",
   "version": "0.0.1",
   "identifier": "com.scratchy.desktop",
-  "build": { "frontendDist": "../dist" },
+  "build": {
+    "frontendDist": "../dist"
+  },
   "app": {
     "windows": [],
-    "security": { "csp": null }
+    "security": {
+      "csp": {
+        "default-src": "'self'",
+        "script-src": "'self'",
+        "style-src": "'self' 'unsafe-inline'",
+        "img-src": "'self' data: att: http://att.localhost",
+        "font-src": "'self' data:",
+        "connect-src": "'self' ipc: http://ipc.localhost wss:",
+        "object-src": "'none'",
+        "base-uri": "'none'",
+        "form-action": "'none'",
+        "frame-src": "'none'"
+      },
+      "dangerousDisableAssetCspModification": [
+        "style-src"
+      ]
+    }
   },
-  "bundle": { "active": false }
+  "bundle": {
+    "active": false
+  }
 }
