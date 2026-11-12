@@ -3,7 +3,7 @@
 # Put GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in desktop/.env.local first to build sync in.
 
 pkgname=scratchy
-pkgver=0.0.1
+pkgver=1.0.0
 pkgrel=1
 pkgdesc="Quick notes that open over whatever you are doing, synced with the Android app"
 arch=('x86_64')

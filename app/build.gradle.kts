@@ -12,8 +12,8 @@ android {
         applicationId = (project.findProperty("appId") as String?) ?: "com.scratchy.app"
         minSdk = 26
         targetSdk = 34
-        versionCode = 2
-        versionName = "1.0"
+        versionCode = 3
+        versionName = "1.0.0"
     }
 
     // Release signing. Published builds use your own private key, given outside the repository: in
