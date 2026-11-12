@@ -4,9 +4,13 @@
 // The account id is the hex SHA-256 of a secret the app derives from the vault password.
 // Knowing the id is what lets a device in; nothing here can be decrypted without the password.
 
+import { servePage } from "./pages.js";
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
+    const shown = request.method === "GET" && servePage(url.pathname);
+    if (shown) return shown;
     const m = url.pathname.match(/^\/v1\/([0-9a-f]{64})\/(ws|blob|relay)$/);
     if (!m) return new Response("scratchy-sync", { status: 404 });
     const stub = env.VAULT.get(env.VAULT.idFromName(m[1]));
