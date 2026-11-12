@@ -1,5 +1,5 @@
-// Scratchy sync relay. One Durable Object per account holds the encrypted notes blob and
-// pushes every change to the other connected devices. It only ever sees ciphertext.
+// Scratchy sync relay. One Durable Object per account passes sealed note changes between that account's connected
+// devices the moment they arrive. It only ever sees ciphertext, and it stores nothing: Google Drive keeps the notes.
 //
 // The account id is the hex SHA-256 of a secret the app derives from the vault password.
 // Knowing the id is what lets a device in; nothing here can be decrypted without the password.
@@ -11,61 +11,62 @@ export default {
     const url = new URL(request.url);
     const shown = request.method === "GET" && servePage(url.pathname);
     if (shown) return shown;
-    const m = url.pathname.match(/^\/v1\/([0-9a-f]{64})\/(ws|blob|relay)$/);
+    const m = url.pathname.match(/^\/v1\/([0-9a-f]{64})\/(ws|relay|tick|blob)$/);
     if (!m) return new Response("scratchy-sync", { status: 404 });
     const stub = env.VAULT.get(env.VAULT.idFromName(m[1]));
     return stub.fetch(request);
   },
 };
 
-const MAX_BYTES = 8 * 1024 * 1024;
+/** A sealed note change, base64. The apps send notes up to 200 KB this way; bigger ones go through Drive only. */
+const MAX_RELAY = 350_000;
+/** Devices of one account connected at once. Far more than anyone has; it keeps a room from being flooded. */
+const MAX_SOCKETS = 32;
 
 export class Vault {
   constructor(state, env) {
     this.state = state;
-    this.sql = state.storage.sql;
-    this.sql.exec("CREATE TABLE IF NOT EXISTS blobs (name TEXT PRIMARY KEY, data BLOB, rev INTEGER)");
+    // Earlier versions kept small files here; nothing is stored any more.
+    state.storage.sql.exec("DROP TABLE IF EXISTS blobs");
   }
 
   async fetch(request) {
     const url = new URL(request.url);
+    const from = request.headers.get("x-device") || "";
     if (url.pathname.endsWith("/ws")) {
       if (request.headers.get("Upgrade") !== "websocket") return new Response("expected websocket", { status: 426 });
+      if (this.state.getWebSockets().length >= MAX_SOCKETS) return new Response("too many devices", { status: 429 });
       const pair = new WebSocketPair();
       this.state.acceptWebSocket(pair[1]);
       return new Response(null, { status: 101, webSocket: pair[0] });
     }
-    // /relay: pass an encrypted note change straight to the other connected devices. Nothing is stored.
+    // /relay: an encrypted note change, straight to the other connected devices.
     if (url.pathname.endsWith("/relay")) {
       if (request.method !== "POST") return new Response("method not allowed", { status: 405 });
+      if (Number(request.headers.get("content-length") || 0) > MAX_RELAY) return new Response("too large", { status: 413 });
       const data = await request.text();
-      if (data.length > 350_000) return new Response("too large", { status: 413 });
-      const msg = JSON.stringify({ type: "note", from: request.headers.get("x-device") || "", data });
-      let n = 0;
-      for (const ws of this.state.getWebSockets()) { try { ws.send(msg); n++; } catch (_) {} }
-      return new Response(JSON.stringify({ delivered: n }), { headers: { "content-type": "application/json" } });
+      if (data.length > MAX_RELAY) return new Response("too large", { status: 413 });
+      const n = this.send({ type: "note", from, data });
+      return Response.json({ delivered: n });
     }
-
-    // /blob?name=notes.enc  (GET reads, PUT writes)
-    const name = url.searchParams.get("name");
-    if (!name || !/^[\w.\-]{1,200}$/.test(name)) return new Response("bad name", { status: 400 });
-    if (request.method === "GET") {
-      const row = this.sql.exec("SELECT data, rev FROM blobs WHERE name = ?", name).toArray()[0];
-      if (!row) return new Response("not found", { status: 404 });
-      return new Response(row.data, { headers: { "x-rev": String(row.rev), "content-type": "application/octet-stream" } });
-    }
-    if (request.method === "PUT") {
-      const data = await request.arrayBuffer();
-      if (data.byteLength > MAX_BYTES) return new Response("too large", { status: 413 });
+    // /tick: "something changed in Drive, go and look". The PUT /blob?name=tick of earlier app versions still rings
+    // the bell, but nothing is kept.
+    const tick = (url.pathname.endsWith("/tick") && request.method === "POST") ||
+      (url.pathname.endsWith("/blob") && request.method === "PUT" && url.searchParams.get("name") === "tick");
+    if (tick) {
       const rev = Date.now();
-      this.sql.exec("INSERT INTO blobs (name, data, rev) VALUES (?, ?, ?) ON CONFLICT(name) DO UPDATE SET data = excluded.data, rev = excluded.rev", name, data, rev);
-      // Tell every connected device that something changed; they fetch what they need.
-      const from = request.headers.get("x-device") || "";
-      const msg = JSON.stringify({ type: "changed", name, rev, from });
-      for (const ws of this.state.getWebSockets()) { try { ws.send(msg); } catch (_) {} }
-      return new Response(JSON.stringify({ rev }), { headers: { "content-type": "application/json" } });
+      this.send({ type: "changed", name: "tick", rev, from });
+      return Response.json({ rev });
     }
-    return new Response("method not allowed", { status: 405 });
+    return new Response("not found", { status: 404 });
+  }
+
+  /** Sends a message to every connected device of this account; returns how many got it. */
+  send(message) {
+    const msg = JSON.stringify(message);
+    let n = 0;
+    for (const ws of this.state.getWebSockets()) { try { ws.send(msg); n++; } catch (_) {} }
+    return n;
   }
 
   // Keep-alive from the app; the object can hibernate between messages.

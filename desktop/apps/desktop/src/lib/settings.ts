@@ -21,12 +21,16 @@ export interface AppSettings {
   startAtLogin: boolean;
   /** The notes window's zoom (1 = 100%). The card has its own, for its text, in card.json. */
   zoom: number;
+  /** The live relay ("https://host"); "" = the default one. */
+  relay: string;
 }
 
 export const DEFAULT_MODEL = "deepseek/deepseek-v4.1-flash-1017";
+/** The relay everyone uses, unless they set their own in Settings → Sync → Advanced (same as the phone's). */
+export const DEFAULT_RELAY = "https://scratchy-sync.halabimilad.workers.dev";
 const defaults: AppSettings = {
   color: "system", shotMode: "ask", shotTtl: 60, shotDir: "", suggestCategories: true,
-  textModel: "", imageModel: "", startAtLogin: true, zoom: 1,
+  textModel: "", imageModel: "", startAtLogin: true, zoom: 1, relay: "",
 };
 
 let current: AppSettings = { ...defaults };
@@ -62,3 +66,22 @@ export async function saveSettings(patch: Partial<AppSettings>) {
 
 export const textModel = () => current.textModel.trim() || DEFAULT_MODEL;
 export const imageModel = () => current.imageModel.trim() || textModel();
+export const relayUrl = () => current.relay.trim() || DEFAULT_RELAY;
+
+/** "https://host" (a relay sits at the root of its address), or null when the text isn't one. */
+export function cleanRelay(text: string): string | null {
+  const t = text.trim().replace(/\/+$/, "");
+  if (!t.startsWith("https://")) return null;
+  const host = t.slice("https://".length);
+  return host && !/[/\s?#]/.test(host) ? `https://${host}` : null;
+}
+
+/** Resolves when `url` answers like a Scratchy relay (its WebSocket address opens), else rejects with why. */
+export function checkRelay(url: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const ws = new WebSocket(`${url.replace(/^https/, "wss")}/v1/${"0".repeat(64)}/ws`);
+    const timer = setTimeout(() => { ws.close(); reject(new Error("It didn't answer.")); }, 8000);
+    ws.onopen = () => { clearTimeout(timer); ws.close(); resolve(); };
+    ws.onerror = () => { clearTimeout(timer); reject(new Error("That address isn't a Scratchy relay, or it can't be reached.")); };
+  });
+}

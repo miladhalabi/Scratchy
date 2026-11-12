@@ -14,12 +14,50 @@ import java.util.UUID
 import java.util.concurrent.TimeUnit
 
 /**
- * Real-time doorbell. Devices of one account keep a WebSocket open to a small Cloudflare relay.
- * After a device uploads a change to Drive it rings the bell; the others hear it and sync at once.
- * No note data goes through the relay, only "something changed". The room name is a hash of the sync key.
+ * Real-time updates. Devices of one account keep a WebSocket open to a small Cloudflare relay, which hands each
+ * sealed note change straight to the others (and rings "go look at Drive" for what it doesn't carry). It can't read
+ * the notes and keeps none of them. The room name is a hash of the sync key.
  */
 object Live {
-    private const val BASE = "https://scratchy-sync.halabimilad.workers.dev"
+    /** The relay everyone uses, unless they set their own in Settings → Sync → Advanced. */
+    const val DEFAULT_RELAY = "https://scratchy-sync.halabimilad.workers.dev"
+
+    private fun prefs(ctx: Context) = ctx.getSharedPreferences("live", Context.MODE_PRIVATE)
+
+    /** The relay in use: the one set in Settings, else [DEFAULT_RELAY]. */
+    fun relayUrl(ctx: Context): String = prefs(ctx).getString("relay", null)?.takeIf { it.isNotBlank() } ?: DEFAULT_RELAY
+
+    /** "https://host" (a relay sits at the root of its address, as the desktop requires), or null when it isn't one. */
+    fun cleanRelay(text: String): String? {
+        val host = text.trim().trimEnd('/').removePrefix("https://").takeIf { it != text.trim().trimEnd('/') } ?: return null
+        return "https://$host".takeIf { host.isNotEmpty() && host.none { it == '/' || it.isWhitespace() || it == '?' || it == '#' } }
+    }
+
+    /**
+     * Checks that [url] answers like a Scratchy relay (its WebSocket address wants an upgrade), then uses it and
+     * reconnects. Null or blank goes back to [DEFAULT_RELAY]. [done] gets null on success, else what went wrong.
+     */
+    fun setRelay(ctx: Context, url: String?, done: (String?) -> Unit) {
+        val app = ctx.applicationContext
+        if (url.isNullOrBlank()) {
+            prefs(app).edit().remove("relay").apply(); restart(app); done(null); return
+        }
+        val clean = cleanRelay(url) ?: return done("Enter just the relay's address, like https://my-relay.example.workers.dev")
+        val probe = Request.Builder().url("$clean/v1/${"0".repeat(64)}/ws").build()
+        http.newCall(probe).enqueue(object : okhttp3.Callback {
+            override fun onFailure(call: okhttp3.Call, e: java.io.IOException) {
+                main.post { done("Couldn't reach it: ${e.message ?: "no connection"}") }
+            }
+            override fun onResponse(call: okhttp3.Call, response: Response) {
+                val ok = response.code == 426
+                response.close()
+                main.post {
+                    if (!ok) done("That address isn't a Scratchy relay (it answered ${response.code}).")
+                    else { prefs(app).edit().putString("relay", clean).apply(); restart(app); done(null) }
+                }
+            }
+        })
+    }
 
     private val main = Handler(Looper.getMainLooper())
     private val http = OkHttpClient.Builder()
@@ -34,7 +72,7 @@ object Live {
     private var reconnect: Runnable? = null
 
     private fun device(ctx: Context): String {
-        val p = ctx.getSharedPreferences("live", Context.MODE_PRIVATE)
+        val p = prefs(ctx)
         return p.getString("device", null) ?: UUID.randomUUID().toString().also { p.edit().putString("device", it).apply() }
     }
 
@@ -67,7 +105,7 @@ object Live {
         val id = Sync.liveId(ctx) ?: return
         val me = device(ctx)
         socket = http.newWebSocket(
-            Request.Builder().url("${BASE.replace("https", "wss")}/v1/$id/ws").build(),
+            Request.Builder().url("${relayUrl(ctx).replaceFirst("https", "wss")}/v1/$id/ws").build(),
             object : WebSocketListener() {
                 override fun onOpen(ws: WebSocket, response: Response) {
                     retry = 0
@@ -99,7 +137,7 @@ object Live {
     fun relay(ctx: Context, payloads: List<String>) {
         val id = Sync.liveId(ctx) ?: return
         for (p in payloads) {
-            val req = Request.Builder().url("$BASE/v1/$id/relay")
+            val req = Request.Builder().url("${relayUrl(ctx)}/v1/$id/relay")
                 .header("x-device", device(ctx))
                 .post(p.toRequestBody())
                 .build()
@@ -113,9 +151,9 @@ object Live {
     /** Tell the other devices something changed in Drive. Fire and forget. */
     fun tick(ctx: Context) {
         val id = Sync.liveId(ctx) ?: return
-        val req = Request.Builder().url("$BASE/v1/$id/blob?name=tick")
+        val req = Request.Builder().url("${relayUrl(ctx)}/v1/$id/tick")
             .header("x-device", device(ctx))
-            .put(System.currentTimeMillis().toString().toRequestBody())
+            .post(ByteArray(0).toRequestBody())
             .build()
         http.newCall(req).enqueue(object : okhttp3.Callback {
             override fun onFailure(call: okhttp3.Call, e: java.io.IOException) {}

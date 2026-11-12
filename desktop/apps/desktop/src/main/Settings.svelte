@@ -6,7 +6,7 @@
   import type { SyncStatus } from "../lib/sync";
   import { engine } from "../lib/notes";
   import { loadCard, type CardState } from "../card/prefs";
-  import { DEFAULT_MODEL, saveSettings, watchSettings, type AppSettings } from "../lib/settings";
+  import { DEFAULT_MODEL, DEFAULT_RELAY, checkRelay, cleanRelay, saveSettings, watchSettings, type AppSettings } from "../lib/settings";
   import { aiKey, ping, setAiKey } from "../lib/ai";
   import { getSystemAccent } from "../lib/theme";
   import Icon from "../lib/Icon.svelte";
@@ -42,7 +42,20 @@
   let error = $state("");
   let done = $state("");
 
-  function go(p: Page) { page = p; advanced = false; form = null; error = ""; done = ""; test = ""; }
+  // ---- the relay (Sync → Advanced) ----
+  let relayText = $state("");
+  let relayMsg = $state("");
+  async function useRelay() {
+    const text = relayText.trim();
+    if (!text) { await set({ relay: "" }); relayMsg = "Using the default relay."; return; }
+    const url = cleanRelay(text);
+    if (!url) { relayMsg = "Enter just the relay's address, like https://my-relay.example.workers.dev"; return; }
+    relayMsg = "Checking…";
+    try { await checkRelay(url); await set({ relay: url }); relayText = url; relayMsg = "Saved. This computer reconnects through it now."; }
+    catch (e) { relayMsg = String((e as Error)?.message ?? e); }
+  }
+
+  function go(p: Page) { page = p; advanced = false; form = null; error = ""; done = ""; test = ""; relayMsg = ""; relayText = s?.relay ?? ""; }
   function show(f: Form) { form = f; pw = pw2 = old = ""; error = ""; done = ""; }
   async function run(job: () => Promise<unknown>, ok = "") {
     busy = true; error = ""; done = "";
@@ -318,6 +331,20 @@
             {#if sync.connected}<button class="text wide" onclick={() => run(() => engine.disconnect())} disabled={busy}>Disconnect</button>{/if}
           {/if}
         </div>
+        <button class="row adv" onclick={() => (advanced = !advanced)}><span>Advanced</span><span class="chev" class:open={advanced}><Icon name="chevron" size={22} /></span></button>
+        {#if advanced}
+          <div class="row">
+            <p class="title">Relay server</p>
+            <input class="field" bind:value={relayText} placeholder={DEFAULT_RELAY} spellcheck="false" autocomplete="off"
+              onkeydown={(e) => { if (e.key === "Enter") void useRelay(); }} />
+            <button class="text wide" onclick={useRelay}>Use this relay</button>
+            {#if relayMsg}<p class="status">{relayMsg}</p>{/if}
+            <p class="caption">
+              Passes your encrypted changes between devices so they arrive in about a second; it can't read them and keeps none of them.
+              Leave it empty for the default, or run your own (worker/ in the source code). Use the same relay on every device.
+            </p>
+          </div>
+        {/if}
       </div>
 
     {:else if page === "vault"}

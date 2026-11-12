@@ -48,7 +48,7 @@ Package `com.scratchy.app` · Kotlin · plain Android Views (no Compose, no XML 
 - **Key**: PBKDF2-SHA256 (120k iterations) of the vault password with a random salt kept in Drive (`meta.json`). Notes and images are sealed with AES-256-GCM before upload.
 - **Layout on Drive**: `meta.json`, `n_<id>.enc` (one per note, deletions stored as markers), `img_<name>` (images).
 - **Merge**: each device keeps the last agreed version of every note (`sync_state.json`) as the common ancestor. See `Merge.kt` (pure Kotlin, unit tested). Ordering uses an edit counter (`rev`), not the phone clock.
-- **Relay**: the Worker only forwards opaque encrypted messages to connected devices of the same account. The account "room" is a hash of the sync key. It stores nothing from the relay route.
+- **Relay**: the Worker only forwards opaque encrypted messages to connected devices of the same account. The account "room" is a hash of the sync key. It stores nothing.
 - Devices that are offline catch up from Drive when they open the app, reconnect, or on the 15-minute background run.
 
 ## Build and install
@@ -61,7 +61,26 @@ Requirements: JDK 17+, Android SDK (platform 35), a device with USB debugging.
 adb install -r app/build/outputs/apk/release/app-release.apk
 ```
 
-The release build is minified (R8) and signed with the local debug keystore (`~/.config/.android/debug.keystore`), so it upgrades over debug installs and keeps your data. After an update the edge bar comes back by itself if it was on (`BootReceiver`).
+The release build is minified (R8). Without a signing key configured it is a personal build, signed with the local debug keystore (`~/.config/.android/debug.keystore`), so it upgrades over debug installs and keeps your data. After an update the edge bar comes back by itself if it was on (`BootReceiver`).
+
+### Signing published releases
+
+Published APKs are signed with your own private key, which never goes in the repository (`*.jks` and `*.keystore` are ignored). Make one once:
+
+```bash
+keytool -genkeypair -v -keystore ~/.config/scratchy-release.jks -alias scratchy -keyalg RSA -keysize 4096 -validity 10000
+```
+
+and point the build at it in `~/.gradle/gradle.properties` (or the `SCRATCHY_*` environment variables, for CI):
+
+```properties
+scratchy.keystore=/home/you/.config/scratchy-release.jks
+scratchy.storePassword=…
+scratchy.keyAlias=scratchy
+scratchy.keyPassword=…
+```
+
+Keep a backup of the keystore and its passwords somewhere safe: every update must be signed with the same key, or it can't install over the app already there. Add the key's SHA-1 (`keytool -list -v -keystore ~/.config/scratchy-release.jks -alias scratchy | grep SHA1`) to an Android OAuth client in Google Cloud, or Drive sign-in won't work in those builds. A phone with a debug-signed Scratchy has to uninstall it before the first release-signed install (sync brings the notes back).
 
 An adb install starts uncompiled (`status=verify`), so the card is slower until the phone's overnight optimization runs. The app ships a startup profile (`app/src/main/baseline-prof.txt`, installed by `androidx.profileinstaller`); before measuring performance, compile with it right away, then restart the app:
 
@@ -108,7 +127,9 @@ npx wrangler login
 npx wrangler deploy
 ```
 
-Then set `BASE` in `app/src/main/java/com/scratchy/app/Live.kt` and `RELAY` in `desktop/apps/desktop/src/lib/sync.ts` to your Worker URL and rebuild. Without a reachable relay, sync still works through Drive (a few seconds slower).
+The apps use the project's relay unless you set another: **Settings → Sync → Advanced → Relay server**, on every device, with the Worker's address (`https://…workers.dev`, no path). The app checks that it answers like a relay before using it. To change the default for everyone in your own builds, edit `DEFAULT_RELAY` in `app/src/main/java/com/scratchy/app/Live.kt` and `desktop/apps/desktop/src/lib/settings.ts`. Without a reachable relay, sync still works through Drive (a few seconds slower).
+
+The relay stores nothing: it passes sealed note changes (`POST /v1/<room>/relay`) and a "go look at Drive" ring (`POST /v1/<room>/tick`) to the room's open WebSockets (`/v1/<room>/ws`, at most 32 per room).
 
 The Worker also serves the home page, privacy policy and terms that Google's consent screen links to (`worker/src/pages.js`, at `/`, `/privacy` and `/terms`). Change the contact address in that file to your own before deploying.
 

@@ -16,8 +16,7 @@ import { files } from "./files";
 import type { LocalStore } from "./localStore";
 import { secrets } from "./secrets";
 import { setVaultPassword } from "./vault";
-
-const RELAY = "https://scratchy-sync.halabimilad.workers.dev";
+import { relayUrl, watchSettings } from "./settings";
 
 export type SyncState = "off" | "idle" | "syncing" | "offline" | "attention";
 export interface SyncStatus {
@@ -74,10 +73,10 @@ const drive = () => new GoogleDrive(accessToken, http as typeof fetch);
 
 const relay: Relay = {
   relay(payloads) {
-    for (const p of payloads) void http(`${RELAY}/v1/${room}/relay`, { method: "POST", headers: { "x-device": device }, body: p }).catch(() => {});
+    for (const p of payloads) void http(`${relayUrl()}/v1/${room}/relay`, { method: "POST", headers: { "x-device": device }, body: p }).catch(() => {});
   },
   tick() {
-    void http(`${RELAY}/v1/${room}/blob?name=tick`, { method: "PUT", headers: { "x-device": device }, body: String(Date.now()) }).catch(() => {});
+    void http(`${relayUrl()}/v1/${room}/tick`, { method: "POST", headers: { "x-device": device } }).catch(() => {});
   },
 };
 const deps = (): SyncDeps => ({ drive: drive(), store, key: key!, relay });
@@ -92,6 +91,13 @@ export async function startSync(s: LocalStore, statusFn: (s: SyncStatus) => void
   else { device = crypto.randomUUID(); await files.writeText("device.json", JSON.stringify({ id: device })); }
   try { saved = { ...saved, ...JSON.parse((await files.readText("sync.json")) ?? "{}") }; } catch { /* first run */ }
   store.onEdit(noteEdited);
+  // A different relay set in Settings: reconnect through it.
+  let relay = "";
+  await watchSettings(() => {
+    const now = relayUrl();
+    if (relay && now !== relay) { dropLive(); connectLive(); }
+    relay = now;
+  });
 
   const a = await secrets.get("sync-auth");
   if (!a) { onStatus(status()); return; }
@@ -282,7 +288,7 @@ function dropLive() { clearTimeout(liveTimer); const ws = live; live = null; ws?
 
 function connectLive() {
   if (!auth || live) return;
-  const ws = new WebSocket(`${RELAY.replace("https", "wss")}/v1/${room}/ws`);
+  const ws = new WebSocket(`${relayUrl().replace(/^https/, "wss")}/v1/${room}/ws`);
   live = ws;
   ws.onopen = () => { retry = 0; void syncNow(); };                 // catch up on anything missed while away
   ws.onmessage = (e) => {

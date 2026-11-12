@@ -472,6 +472,31 @@ class SettingsActivity : Activity() {
                     Sync.disconnect(this@SettingsActivity); syncUi()
                 }, LinearLayout.LayoutParams(-1, dp(40)).apply { topMargin = dp(6) })
             }
+            advanced {
+                row {
+                    title(pal, "Relay server")
+                    val custom = Live.relayUrl(context).takeIf { it != Live.DEFAULT_RELAY }.orEmpty()
+                    val field = EditText(context).apply {
+                        hint = Live.DEFAULT_RELAY
+                        setSingleLine(true); textSize = 15f
+                        setTextColor(pal.text); setHintTextColor(pal.secondary)
+                        inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
+                        setPadding(dp(14), dp(12), dp(14), dp(12))
+                        background = roundRect(trackColor(pal), dp(12).toFloat())
+                        setText(custom)
+                    }
+                    addView(field, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(10) })
+                    val result = TextView(context).apply { textSize = 14f; setTextColor(pal.secondary); setPadding(dp(2), dp(10), 0, 0) }
+                    addView(syncButton(TextView(context).apply { text = "Use this relay" }, false) {
+                        result.text = if (field.text.isBlank()) "" else "Checking…"
+                        Live.setRelay(this@SettingsActivity, field.text.toString()) { err ->
+                            result.text = err ?: if (field.text.isBlank()) "Using the default relay." else "Saved. Your devices reconnect through it now."
+                        }
+                    }, LinearLayout.LayoutParams(-1, dp(40)).apply { topMargin = dp(6) })
+                    addView(result)
+                    caption(pal, "Passes your encrypted changes between devices so they arrive in about a second; it can't read them and keeps none of them. Leave it empty for the default, or run your own (worker/ in the source code). Use the same relay on every device.")
+                }
+            }
         })
         syncUi()
     }
