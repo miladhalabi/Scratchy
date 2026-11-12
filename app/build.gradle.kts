@@ -16,14 +16,25 @@ android {
         versionName = "1.0"
     }
 
-    // Personal build: signed with the same key as the debug build, so it installs over the debug app
-    // and keeps your notes. For publishing, replace this with a real private key.
+    // Release signing. Published builds use your own private key, given outside the repository: in
+    // ~/.gradle/gradle.properties (scratchy.keystore, scratchy.storePassword, scratchy.keyAlias, scratchy.keyPassword)
+    // or, for CI, as SCRATCHY_KEYSTORE, SCRATCHY_STORE_PASSWORD, SCRATCHY_KEY_ALIAS, SCRATCHY_KEY_PASSWORD.
+    // Without them it is a personal build, signed with the debug key so it installs over the debug app.
+    fun secret(name: String, env: String) = (project.findProperty("scratchy.$name") as String?) ?: System.getenv(env)
+    val keystore = secret("keystore", "SCRATCHY_KEYSTORE")
     signingConfigs {
         create("release") {
-            storeFile = file(System.getProperty("user.home") + "/.config/.android/debug.keystore")
-            storePassword = "android"
-            keyAlias = "androiddebugkey"
-            keyPassword = "android"
+            if (keystore != null) {
+                storeFile = file(keystore)
+                storePassword = secret("storePassword", "SCRATCHY_STORE_PASSWORD")
+                keyAlias = secret("keyAlias", "SCRATCHY_KEY_ALIAS")
+                keyPassword = secret("keyPassword", "SCRATCHY_KEY_PASSWORD")
+            } else {
+                storeFile = file(System.getProperty("user.home") + "/.config/.android/debug.keystore")
+                storePassword = "android"
+                keyAlias = "androiddebugkey"
+                keyPassword = "android"
+            }
         }
     }
 

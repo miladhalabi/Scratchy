@@ -5,3 +5,6 @@ build/
 .idea/
 .wrangler/
 node_modules/
+# Signing keys stay out of the repository
+*.jks
+*.keystore
