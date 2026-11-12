@@ -1,0 +1,80 @@
+# Every push to main and every pull request: the tests and builds of the phone app, the desktop app and the relay.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  android:
+    name: Android
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: gradle/actions/setup-gradle@v4
+      # The debug build: release signing needs the private key, which only the release workflow has.
+      - name: Unit tests and build
+        run: ./gradlew testDebugUnitTest assembleDebug
+
+  desktop:
+    name: Desktop
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: desktop
+    steps:
+      - uses: actions/checkout@v4
+      - name: System libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libgtk-layer-shell-dev \
+            libayatana-appindicator3-dev librsvg2-dev libdbus-1-dev pkg-config
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: desktop/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - name: Tests (core and app)
+        run: pnpm -r test
+      - name: Type check
+        run: pnpm --filter @scratchy/desktop check
+      # The Rust side embeds the built page, so the page is built first.
+      - name: Build the page
+        run: pnpm --filter @scratchy/desktop build
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desktop
+      - name: Rust check
+        run: cargo check --locked -p scratchy-desktop
+
+  worker:
+    name: Relay
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Syntax and pages
+        working-directory: worker
+        run: |
+          node --check src/index.js
+          node --check src/pages.js
+          node -e 'import("./src/pages.js").then(m => { for (const p of ["/", "/privacy", "/terms"]) if (!m.servePage(p)) throw new Error("missing page " + p) })'
