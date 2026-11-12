@@ -1,7 +1,7 @@
 {
   "name": "@scratchy/core",
   "version": "0.0.1",
-  "private": true,
+  "private": true, "license": "GPL-3.0-or-later",
   "type": "module",
   "main": "src/index.ts",
   "scripts": {

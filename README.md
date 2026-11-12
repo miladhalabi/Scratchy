@@ -14,6 +14,7 @@
   <img alt="Windows and macOS planned" src="https://img.shields.io/badge/Windows%20%26%20macOS-planned-lightgrey">
   <img alt="Sync in about a second" src="https://img.shields.io/badge/sync-~1%20second-e68e0d">
   <img alt="End-to-end encrypted" src="https://img.shields.io/badge/end--to--end-encrypted-2ea44f">
+  <img alt="License: GPL-3.0" src="https://img.shields.io/badge/license-GPL--3.0-blue">
 </p>
 
 <p align="center">
@@ -202,3 +203,9 @@ A short menu with one small page per topic, and an *Advanced* fold for the rare 
 | [`docs/`](docs) | [Developer notes](docs/DEVELOPMENT.md): how sync works, the code map, and setting up Google Drive and the relay. |
 
 The sync format is versioned and shared by both apps: a note written on one reads the same on the other, and opening it never rewrites it.
+
+## 📜 License
+
+Scratchy is free software under the [GNU General Public License v3.0 or later](LICENSE). You can use, study, change and share it; if you share a changed version, share its source under the same license.
+
+Copyright © 2026 Milad Halabi
