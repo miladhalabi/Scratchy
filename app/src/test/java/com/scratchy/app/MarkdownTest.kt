@@ -103,4 +103,9 @@ class MarkdownTest {
         val d = Markdown.firstDifference("one two three", "one two tree")!!
         assertTrue(d.first.contains("three") || d.first.contains("thr"))
     }
+
+    @Test fun table_copies_as_words() {
+        val rows = listOf(listOf("**Item**", "Price"), listOf("", ""), listOf("[Milk](https://x.y)", "`2`"), listOf("Eggs", ""))
+        assertEquals("Item\tPrice\nMilk\t2\nEggs", Markdown.tableText(rows))
+    }
 }

@@ -221,6 +221,20 @@ object RichText {
     /** Index just after the paragraph's newline, or the text length for the last paragraph. */
     fun paraEnd(t: CharSequence, i: Int): Int { val n = t.indexOf('\n', i); return if (n < 0) t.length else n + 1 }
 
+    /** The words between [a] and [b], for copying: no list markers or symbols, and each table as its cells' text. */
+    fun plainText(e: Spanned, a: Int, b: Int): String {
+        val out = StringBuilder()
+        var i = a
+        for (t in e.getSpans(a, b, RTable::class.java).sortedBy { e.getSpanStart(it) }) {
+            val s = e.getSpanStart(t)
+            if (s < i || s >= b) continue
+            out.append(e, i, s).append(Markdown.tableText(t.data.rows))
+            i = s + 1
+        }
+        out.append(e, i, b)
+        return out.toString().replace(TABLE_CHAR.toString(), "")
+    }
+
     /** The table whose line contains [pos], with the offset of its placeholder character. */
     fun tableAt(e: Spanned, pos: Int): Pair<RTable, Int>? {
         val ps = paraStart(e, pos)

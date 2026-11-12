@@ -12,9 +12,12 @@ import android.text.Editable
 import android.text.InputType
 import android.text.TextWatcher
 import android.util.TypedValue
+import android.view.ActionMode
 import android.view.GestureDetector
 import android.view.Gravity
 import android.view.KeyEvent
+import android.view.Menu
+import android.view.MenuInflater
 import android.view.MotionEvent
 import android.view.View
 import android.view.inputmethod.EditorInfo
@@ -28,6 +31,7 @@ import android.widget.FrameLayout
 import android.widget.HorizontalScrollView
 import android.widget.ImageView
 import android.widget.LinearLayout
+import android.widget.PopupMenu
 import android.widget.TextView
 import android.widget.Toast
 import java.io.File
@@ -56,6 +60,79 @@ class NoteEditor(
         override fun onSelectionChanged(selStart: Int, selEnd: Int) {
             super.onSelectionChanged(selStart, selEnd)
             selectionChanged(this)
+        }
+
+        /**
+         * The card is built before its window exists, and Android decides then (from the window) that a field outside
+         * a window can't show selection handles. It only asks again when the text is laid out anew (a resize), so the
+         * handles were missing until then. Turning the cursor off and on makes it ask again, now in the card's window.
+         */
+        override fun onAttachedToWindow() {
+            super.onAttachedToWindow()
+            if (isCursorVisible) { isCursorVisible = false; isCursorVisible = true }
+        }
+
+        private var downX = 0f
+        private var downY = 0f
+        /** The card's long-press: whole paragraphs, from [anchorA] to [anchorB], grown while the finger drags. */
+        var lineDrag = false
+            private set
+        private var anchorA = 0
+        private var anchorB = 0
+
+        /**
+         * The lines a long-press chose. Android settles its selection mode a moment after the finger lifts and puts
+         * back the word it started from; [selectionModeStarted] sets these lines again once that has happened.
+         */
+        private var lines: Pair<Int, Int>? = null
+
+        fun selectionModeStarted() {
+            val (a, b) = lines ?: return
+            lines = null
+            post { if (b <= text.length) setSelection(a, b) }
+        }
+
+        override fun onTouchEvent(ev: MotionEvent): Boolean {
+            if (ev.actionMasked == MotionEvent.ACTION_DOWN) { downX = ev.x; downY = ev.y; lineDrag = false; lines = null }
+            val r = super.onTouchEvent(ev)
+            // After Android's own word-by-word drag, so the paragraphs win.
+            if (lineDrag) when (ev.actionMasked) {
+                MotionEvent.ACTION_MOVE -> dragTo(ev)
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    if (ev.actionMasked == MotionEvent.ACTION_UP) dragTo(ev)
+                    lineDrag = false
+                    lines = minOf(selectionStart, selectionEnd) to maxOf(selectionStart, selectionEnd)
+                    selectionChanged(this)
+                }
+            }
+            return r
+        }
+
+        override fun performLongClick(): Boolean {
+            if (!compactMode) return super.performLongClick()
+            val off = getOffsetForPosition(downX, downY)
+            if (hasSelection()) setSelection(off)          // a long-press inside a selection would start dragging the text away
+            menuByLongPress = true
+            menuTarget = this
+            val r = super.performLongClick()               // Android selects the word under the finger
+            val (a, b) = lineRange(text, off, off)
+            if (b > a) {
+                anchorA = a; anchorB = b
+                lineDrag = true
+                parent?.requestDisallowInterceptTouchEvent(true)   // the note's scrolling must not take the drag
+                setSelection(a, b)
+            } else setSelection(off)                       // an empty line: just the cursor, and Paste
+            selectionChanged(this)
+            return r
+        }
+
+        private fun dragTo(ev: MotionEvent) {
+            val off = getOffsetForPosition(ev.x, ev.y)
+            val (a, b) = lineRange(text, minOf(anchorA, off), maxOf(anchorB, off))
+            if (a != minOf(selectionStart, selectionEnd) || b != maxOf(selectionStart, selectionEnd)) {
+                setSelection(a, b)
+                performHapticFeedback(android.view.HapticFeedbackConstants.CLOCK_TICK)
+            }
         }
 
         /** Backspace at the start of a list item, quote or heading removes that format instead of joining lines. */
@@ -106,17 +183,37 @@ class NoteEditor(
     val bodyEdit: EditText = Edit(ctx)
 
     // The floating card is an overlay window, which cannot show Android's own Copy/Paste bar.
-    // So the card gets its own small menu: Select all, Cut, Copy, Paste.
+    // So the card gets its own small bubble next to the selection: Copy, Cut, Paste, + Line, All.
     private var ready = false
     private var menuTarget: EditText? = null
     private var menuByLongPress = false
     private val menuRow = LinearLayout(ctx).apply {
         gravity = Gravity.CENTER_VERTICAL
-        visibility = View.GONE
-        setPadding(dp(2), dp(8), dp(2), dp(2))
+        setPadding(dp(4), dp(4), dp(4), dp(4))
     }
-    private val menuCut by lazy { menuItem("Cut") { copySelection(cut = true) } }
+    private val bubble = HorizontalScrollView(ctx).apply {
+        isHorizontalScrollBarEnabled = false
+        visibility = View.GONE
+        background = roundRect(pal.surface, dp(22).toFloat(), (pal.text and 0xFFFFFF) or 0x24000000, dp(1))
+        elevation = dp(8).toFloat()
+        addView(menuRow)
+    }
+    /** The scrolling page of the note, with the bubble floating over it. */
+    private val pageFrame = FrameLayout(ctx)
     private val menuCopy by lazy { menuItem("Copy") { copySelection(cut = false) } }
+    private val menuCut by lazy { menuItem("Cut") { copySelection(cut = true) } }
+    private val menuPaste by lazy { menuItem("Paste") { target().requestFocus(); pasteFromClipboard(); hideMenu() } }
+    private val menuLine by lazy { menuItem("+ Line") { addLine() } }
+    private val menuAll by lazy { menuItem("All") { target().selectAll() } }
+    /** "Copied" / "Cut", shown in the bubble for a moment in place of the buttons. */
+    private val menuDone by lazy { menuItem("") {}.apply { visibility = View.GONE; setTextColor(palette.secondary) } }
+    private var confirming = false
+    private val endConfirm = Runnable {
+        confirming = false
+        menuDone.visibility = View.GONE
+        menuPaste.visibility = View.VISIBLE; menuAll.visibility = View.VISIBLE
+        hideMenu()
+    }
 
     private val palette = pal
     private val images = note.images.toMutableList()
@@ -186,10 +283,7 @@ class NoteEditor(
         }, LayoutParams(-1, -2))
         addView(View(ctx).apply { setBackgroundColor(pal.hairline) },
             LayoutParams(-1, 1).apply { marginStart = dp(4); marginEnd = dp(4) })
-        addView(menuRow, LayoutParams(-1, -2))
-        menuItem("Select all") { target().selectAll() }
-        menuCut; menuCopy
-        menuItem("Paste") { target().requestFocus(); pasteFromClipboard(); hideMenu() }
+        menuCopy; menuCut; menuPaste; menuLine; menuAll; menuDone
         suggestScroll.apply {
             isHorizontalScrollBarEnabled = false
             visibility = View.GONE
@@ -221,11 +315,14 @@ class NoteEditor(
             addView(imageBox, LayoutParams(-1, -2))
             addView(bodyEdit, LayoutParams(-1, -2, 1f))
         }
-        addView(android.widget.ScrollView(ctx).apply {
+        pageFrame.addView(android.widget.ScrollView(ctx).apply {
             isFillViewport = true
             isVerticalScrollBarEnabled = false
             addView(page)
-        }, LayoutParams(-1, 0, 1f))
+            setOnScrollChangeListener { _, _, _, _, _ -> placeBubble() }
+        }, FrameLayout.LayoutParams(-1, -1))
+        pageFrame.addView(bubble, FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.START))
+        addView(pageFrame, LayoutParams(-1, 0, 1f))
 
         // The link field appears above the keyboard only while a link is being added (full note screen only).
         if (!compact) { buildLinkRow(ctx, pal); addView(linkRow, LayoutParams(-1, -2)) }
@@ -301,51 +398,150 @@ class NoteEditor(
             if (ev.actionMasked == MotionEvent.ACTION_DOWN) { menuByLongPress = false; onTouched?.invoke(v) }
             false
         }
-        if (compact) for (e in listOf(titleEdit, bodyEdit)) {
-            e.setOnLongClickListener {
-                menuByLongPress = true
-                menuTarget = e
-                showMenu()
-                refreshMenu()
-                false            // let Android still select the word
-            }
-        }
         ready = true
     }
 
     // ---- the card's own copy / paste menu ----
 
+    /**
+     * Android shows the selection handles only while its floating Copy/Paste bar is up, and an overlay window has no
+     * place to show that bar, so the handles never came. The card answers with a mode that shows nothing (the bubble
+     * is the menu), which is all Android needs to draw the handles and let you drag them.
+     */
+    override fun startActionModeForChild(originalView: View, callback: ActionMode.Callback, type: Int): ActionMode? {
+        if (!compactMode || type != ActionMode.TYPE_FLOATING) return super.startActionModeForChild(originalView, callback, type)
+        val mode = QuietMode(callback, PopupMenu(context, originalView).menu)
+        if (!callback.onCreateActionMode(mode, mode.menu)) return null
+        callback.onPrepareActionMode(mode, mode.menu)
+        (originalView as? Edit)?.selectionModeStarted()
+        return mode
+    }
+
+    private inner class QuietMode(private val callback: ActionMode.Callback, private val items: Menu) : ActionMode() {
+        private var title: CharSequence? = null
+        private var subtitle: CharSequence? = null
+        private var custom: View? = null
+        private var done = false
+        override fun setTitle(t: CharSequence?) { title = t }
+        override fun setTitle(resId: Int) { title = context.getString(resId) }
+        override fun setSubtitle(s: CharSequence?) { subtitle = s }
+        override fun setSubtitle(resId: Int) { subtitle = context.getString(resId) }
+        override fun setCustomView(v: View?) { custom = v }
+        override fun invalidate() { if (!done) callback.onPrepareActionMode(this, items) }
+        override fun finish() { if (!done) { done = true; callback.onDestroyActionMode(this) } }
+        override fun getMenu(): Menu = items
+        override fun getTitle() = title
+        override fun getSubtitle() = subtitle
+        override fun getCustomView() = custom
+        override fun getMenuInflater() = MenuInflater(context)
+    }
+
     private fun menuItem(label: String, onTap: () -> Unit): TextView = TextView(context).apply {
         text = label
-        setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
+        setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
         setTextColor(palette.accent)
         typeface = android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL)
-        setPadding(dp(12), dp(7), dp(12), dp(7))
-        background = roundRect(palette.hairline, dp(14).toFloat())
-        pressable(0.95f) { onTap() }
-    }.also { menuRow.addView(it, LayoutParams(-2, -2).apply { marginEnd = dp(6) }) }
+        gravity = Gravity.CENTER
+        minWidth = dp(44)
+        setPadding(dp(10), 0, dp(10), 0)
+        background = roundRect(0, dp(18).toFloat())
+        pressable(0.92f) { onTap() }
+    }.also { menuRow.addView(it, LayoutParams(-2, dp(40))) }
 
     private fun target(): EditText = menuTarget ?: if (titleEdit.hasFocus()) titleEdit else bodyEdit
 
-    private fun showMenu() { menuRow.visibility = View.VISIBLE }
+    /** Whole paragraphs around [a]..[b]: from the start of the first to the end of the last, without its newline. */
+    private fun lineRange(t: CharSequence, a: Int, b: Int): Pair<Int, Int> {
+        val s = RichText.paraStart(t, a.coerceIn(0, t.length))
+        val n = t.indexOf('\n', b.coerceIn(0, t.length))
+        return s to (if (n < 0) t.length else n)
+    }
 
-    private fun hideMenu() { menuByLongPress = false; menuRow.visibility = View.GONE }
+    private fun showMenu() {
+        if ((target() as? Edit)?.lineDrag == true) { bubble.visibility = View.GONE; return }   // out of the finger's way while it drags
+        if (bubble.visibility != View.VISIBLE) {
+            bubble.visibility = View.VISIBLE
+            bubble.alpha = 0f
+            bubble.animate().alpha(1f).setDuration(120).start()
+        }
+        bubble.post { placeBubble() }
+    }
 
-    /** Cut and Copy only make sense with something selected; dim them otherwise. */
+    private fun hideMenu() {
+        if (confirming) return
+        menuByLongPress = false
+        bubble.visibility = View.GONE
+    }
+
+    /** Copy, Cut and + Line only with something to act on; Paste and All always. */
     private fun refreshMenu() {
         val t = target()
         val has = t.selectionStart != t.selectionEnd
-        menuCut.alpha = if (has) 1f else 0.35f
-        menuCopy.alpha = if (has) 1f else 0.35f
+        menuCopy.visibility = if (has) View.VISIBLE else View.GONE
+        menuCut.visibility = if (has) View.VISIBLE else View.GONE
+        menuLine.visibility = if (canAddLine(t)) View.VISIBLE else View.GONE
+        bubble.post { placeBubble() }
+    }
+
+    /** Puts the bubble just above the selection, or below it (past the handles) when there is no room above. */
+    private fun placeBubble() {
+        if (bubble.visibility != View.VISIBLE) return
+        val t = target()
+        val layout = t.layout ?: return
+        val fw = pageFrame.width; val fh = pageFrame.height
+        if (fw == 0 || fh == 0) return
+        val bw = bubble.width; val bh = bubble.height
+        if (bw == 0) { bubble.post { placeBubble() }; return }          // not laid out yet
+        val fl = IntArray(2).also(pageFrame::getLocationInWindow)
+        val el = IntArray(2).also(t::getLocationInWindow)
+        val ox = el[0] - fl[0] + t.totalPaddingLeft - t.scrollX
+        val oy = el[1] - fl[1] + t.totalPaddingTop - t.scrollY
+        val len = t.text.length
+        val a = minOf(t.selectionStart, t.selectionEnd).coerceIn(0, len)
+        val b = maxOf(t.selectionStart, t.selectionEnd).coerceIn(0, len)
+        val la = layout.getLineForOffset(a); val lb = layout.getLineForOffset(b)
+        val top = oy + layout.getLineTop(la)
+        val bottom = oy + layout.getLineBottom(lb)
+        val cx = if (la == lb) ox + (layout.getPrimaryHorizontal(a) + layout.getPrimaryHorizontal(b)) / 2
+            else fw / 2f
+        val gap = dp(6)
+        var y = top - bh - gap
+        if (y < 0) y = bottom + dp(34)                      // below the selection handles
+        bubble.translationY = y.coerceIn(0, maxOf(0, fh - bh)).toFloat()
+        bubble.translationX = (cx - bw / 2f).coerceIn(dp(4).toFloat(), maxOf(dp(4), fw - bw - dp(4)).toFloat())
     }
 
     private fun selectionChanged(v: EditText) {
         if (ready && v === bodyEdit) refreshFormat()
-        if (!ready || !compactMode) return
+        if (!ready || !compactMode || confirming) return
         menuTarget = v
-        if (v.selectionStart != v.selectionEnd) showMenu()
-        else if (!menuByLongPress) hideMenu()
+        if (v.selectionStart != v.selectionEnd || menuByLongPress) showMenu()
+        else hideMenu()
         refreshMenu()
+    }
+
+    /** True while + Line still has something to add: a part-line to complete, or a next paragraph. */
+    private fun canAddLine(t: EditText): Boolean {
+        val e = t.text
+        val a = minOf(t.selectionStart, t.selectionEnd).coerceAtLeast(0)
+        val b = maxOf(t.selectionStart, t.selectionEnd).coerceAtLeast(0)
+        val (la, lb) = lineRange(e, a, b)
+        return if (a == b) lb > la else la != a || lb != b || e.substring(b).isNotBlank()
+    }
+
+    /** Selects the whole line, then each tap adds the next one (blank lines are passed over). */
+    private fun addLine() {
+        val t = target()
+        val e = t.text
+        val a = minOf(t.selectionStart, t.selectionEnd).coerceAtLeast(0)
+        val b = maxOf(t.selectionStart, t.selectionEnd).coerceAtLeast(0)
+        val (la, lb) = lineRange(e, a, b)
+        if (la != a || lb != b || a == b) { if (lb > la) t.setSelection(la, lb); return }
+        var next = b
+        while (next < e.length && e[next] == '\n') next++
+        if (next >= e.length) return
+        t.setSelection(a, lineRange(e, next, next).second)
+        t.performHapticFeedback(android.view.HapticFeedbackConstants.CLOCK_TICK)
     }
 
     private fun copySelection(cut: Boolean) {
@@ -353,11 +549,17 @@ class NoteEditor(
         val a = minOf(t.selectionStart, t.selectionEnd)
         val b = maxOf(t.selectionStart, t.selectionEnd)
         if (a < 0 || a == b) return
+        val words = if (t === bodyEdit) RichText.plainText(t.text, a, b) else t.text.substring(a, b)
         context.getSystemService(ClipboardManager::class.java)
-            .setPrimaryClip(ClipData.newPlainText("Scratchy", t.text.subSequence(a, b)))
-        if (cut) t.text.delete(a, b)
-        Toast.makeText(context, if (cut) "Cut" else "Copied", Toast.LENGTH_SHORT).show()
-        hideMenu()
+            .setPrimaryClip(ClipData.newPlainText("Scratchy", words))
+        // The card's own "Copied" in the bubble: a toast can end up behind the card.
+        confirming = true
+        menuDone.text = if (cut) "✓ Cut" else "✓ Copied"
+        for (i in 0 until menuRow.childCount) menuRow.getChildAt(i).let { it.visibility = if (it === menuDone) View.VISIBLE else View.GONE }
+        if (cut) t.text.delete(a, b) else t.setSelection(b)
+        bubble.post { placeBubble() }
+        handler.removeCallbacks(endConfirm)
+        handler.postDelayed(endConfirm, 900)
     }
 
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
@@ -385,6 +587,7 @@ class NoteEditor(
     }
 
     fun load(n: Note) {
+        if (compactMode) { handler.removeCallbacks(endConfirm); endConfirm.run() }   // no bubble left over from the last note
         suppress = true
         handler.removeCallbacks(askCategory); handler.removeCallbacks(hideOffer)
         categoryOffer.visibility = View.GONE

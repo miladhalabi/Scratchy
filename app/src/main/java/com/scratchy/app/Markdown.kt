@@ -141,6 +141,11 @@ object Markdown {
         return t.trim()
     }
 
+    /** A table as plain text, for copying: one row per line, cells apart by a tab (so it also pastes into a sheet). */
+    fun tableText(rows: List<List<String>>): String =
+        rows.map { r -> r.map(::plain) }.filter { r -> r.any { it.isNotEmpty() } }
+            .joinToString("\n") { it.joinToString("\t").trimEnd('\t') }
+
     private val levelSize = floatArrayOf(1.4f, 1.25f, 1.12f, 1.05f, 1f, 1f)
 
     // ---- reading: rendered, markers hidden ----
