@@ -1,0 +1,48 @@
+name: Bug report
+description: Something doesn't work as it should.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. Please don't paste the text of private notes, and report security problems privately (see SECURITY.md).
+  - type: dropdown
+    id: where
+    attributes:
+      label: Where
+      options:
+        - Android app
+        - Desktop app
+        - Sync between devices
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: How to make it happen again
+      placeholder: |
+        1. Open the card
+        2. …
+  - type: input
+    id: version
+    attributes:
+      label: Scratchy version
+      placeholder: "1.0.0"
+  - type: input
+    id: device
+    attributes:
+      label: Phone or desktop
+      placeholder: "Pixel 8, Android 15 / Arch Linux, Hyprland 0.52"
+  - type: textarea
+    id: extra
+    attributes:
+      label: Screenshots or logs
+      description: Anything else that helps. Check that nothing private is visible.

@@ -201,9 +201,20 @@ The color system (follows the wallpaper, with a fixed-color fallback) and the ne
 - [ ] Try the vault password change on two real devices.
 - [ ] Look at the secret-notes images: they are hidden in the app but not encrypted on disk.
 
-## Project notes
+## Publishing a release
 
-`PLAN.md` is the original design plan. The app has since moved from a notification-based idea to the edge bar and card described above.
+Pushing a tag like `v1.0.0` runs `.github/workflows/release.yml`: it tests and builds the APK signed with the release key, builds the Arch package with Google sign-in built in, and publishes both as a GitHub Release with notes made from the commits. It needs these repository secrets (Settings → Secrets and variables → Actions):
+
+| Secret | What it holds |
+| --- | --- |
+| `SCRATCHY_KEYSTORE_BASE64` | The release keystore, as `base64 -w0 ~/.config/scratchy-release.jks` prints it |
+| `SCRATCHY_STORE_PASSWORD`, `SCRATCHY_KEY_PASSWORD` | Its passwords |
+| `SCRATCHY_KEY_ALIAS` | `scratchy` |
+| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | The Google Cloud "Desktop app" OAuth client, as in `desktop/.env.local` |
+
+Before tagging, raise the version in `app/build.gradle.kts` (`versionCode` by one, and `versionName`), `desktop/apps/desktop/src-tauri/tauri.conf.json`, `desktop/apps/desktop/src-tauri/Cargo.toml` and `desktop/packaging/arch/PKGBUILD`, and note the changes in `CHANGELOG.md`.
+
+Every push to `main` and every pull request runs `.github/workflows/ci.yml`: the Android unit tests and debug build, the desktop tests, type check and Rust check, and a check of the relay.
 
 ## Screenshots without showing your notes
 

@@ -139,27 +139,20 @@ Also on the desktop: zoom with Ctrl+= and Ctrl+- (the card zooms its text and ke
 
 ## 📲 Install
 
+Download the latest version from **[Releases](https://github.com/miladhalabi/Scratchy/releases)**. Sync works out of the box with these builds: connect Google Drive in Settings and choose a vault password.
+
 ### Android
 
-Not on the Play Store. Build it and install it over USB (JDK 17+, Android SDK, a phone with USB debugging):
-
-```bash
-./gradlew assembleRelease
-adb install -r app/build/outputs/apk/release/app-release.apk
-```
+Not on the Play Store. Download `scratchy-<version>.apk` from Releases on the phone and open it (allow installing from your browser or file manager when Android asks). Android 8.0 or newer.
 
 On first run, allow "Display over other apps" and photo access, then switch the edge bar on from the notes screen.
 
 ### Desktop (Arch Linux)
 
-Build the package from this checkout and install it (Rust, Node.js and pnpm needed):
+Download `scratchy-<version>-x86_64.pkg.tar.zst` from Releases and install it:
 
 ```bash
-cd desktop
-pnpm install
-cd packaging/arch
-makepkg -f
-sudo pacman -U scratchy-*.pkg.tar.zst
+sudo pacman -U scratchy-*-x86_64.pkg.tar.zst
 ```
 
 Start **Scratchy** from your launcher, then add the shortcut to your Hyprland config. Settings in the app shows this line with a Copy button:
@@ -170,14 +163,9 @@ bind = SUPER ALT, N, exec, scratchy-toggle
 
 The card is a layer-shell surface, which is what lets it cover fullscreen apps. It is tested on Hyprland (Omarchy). Sway and KDE should work, since they have layer-shell too; GNOME isn't supported yet.
 
-### Sync
+### Building it yourself
 
-Sync needs a free Google Cloud project, and the instant updates a free Cloudflare Worker; the steps are in the [developer notes](docs/DEVELOPMENT.md#setting-up-sync). For the desktop, put the project's desktop client in `desktop/.env.local` before building:
-
-```
-GOOGLE_CLIENT_ID=…
-GOOGLE_CLIENT_SECRET=…
-```
+Everything builds from this repository; see the [developer notes](docs/DEVELOPMENT.md) and [CONTRIBUTING.md](CONTRIBUTING.md). Your own builds need your own free Google Cloud project for Drive sync ([steps](docs/DEVELOPMENT.md#setting-up-sync)); the live relay can stay the project's, or you can run your own and set it in Settings → Sync → Advanced.
 
 ## ⚙️ Settings on the phone
 

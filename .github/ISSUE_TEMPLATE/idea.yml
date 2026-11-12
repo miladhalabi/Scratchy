@@ -1,0 +1,25 @@
+name: Idea
+description: Something Scratchy could do, or do better.
+labels: [idea]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What you're trying to do
+      description: The situation and what gets in the way today.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would help
+      description: How you imagine it working. Rough is fine.
+  - type: dropdown
+    id: where
+    attributes:
+      label: Where
+      multiple: true
+      options:
+        - Android app
+        - Desktop app
+        - Sync
