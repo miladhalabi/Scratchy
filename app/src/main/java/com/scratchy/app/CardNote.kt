@@ -12,6 +12,10 @@ object CardNote {
     fun mode(ctx: Context) = prefs(ctx).getString("open_mode", "recent") ?: "recent"
     fun setMode(ctx: Context, m: String) = prefs(ctx).edit().putString("open_mode", m).apply()
 
+    /** The card opens compact (smaller, slimmer header and Close) instead of normal. Chosen in Settings. */
+    fun compact(ctx: Context) = prefs(ctx).getString("card_style", "normal") == "compact"
+    fun setCompact(ctx: Context, on: Boolean) = prefs(ctx).edit().putString("card_style", if (on) "compact" else "normal").apply()
+
     /**
      * Remember the note the card last worked on, and when. Picking an old note from the card's list
      * counts as using it now, so it still comes back next time. Blank notes are never remembered.

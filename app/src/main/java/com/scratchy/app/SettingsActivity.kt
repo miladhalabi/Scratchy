@@ -203,7 +203,10 @@ class SettingsActivity : Activity() {
                 navRow(pal, R.drawable.ic_grip, "Edge bar",
                     (if (prefs.getBoolean("right", false)) "Right side" else "Left side") + " · ${prefs.getInt("bar_gap", 8)} dp from the edge") { open("bar") }
             }
-            row { navRow(pal, R.drawable.ic_pen, "Card", "Opens on: ${modeNames[CardNote.mode(context)] ?: "Recent"}") { open("card") } }
+            row {
+                navRow(pal, R.drawable.ic_pen, "Card", "Opens on: ${modeNames[CardNote.mode(context)] ?: "Recent"}" +
+                    if (CardNote.compact(context)) " · Compact" else "") { open("card") }
+            }
             row {
                 navRow(pal, R.drawable.ic_palette, "Appearance",
                     "$colorName · " + (if (Appearance.isGlass(context)) "Glass" else "Solid") + " card") { open("look") }
@@ -274,6 +277,14 @@ class SettingsActivity : Activity() {
                     note.text = help[modes[i].first]
                 }, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(10) })
                 note = caption(pal, help[CardNote.mode(context)].orEmpty())
+            }
+            row {
+                title(pal, "Card size")
+                addView(SegmentedControl(context, pal, listOf("Normal", "Compact"),
+                    if (CardNote.compact(context)) 1 else 0) { i ->
+                    CardNote.setCompact(context, i == 1)
+                }, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(10) })
+                caption(pal, "Compact is smaller, with a slimmer top row and Close. The button next to the pin switches an open card between the two.")
             }
         })
     }

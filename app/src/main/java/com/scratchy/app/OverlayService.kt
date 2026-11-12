@@ -353,7 +353,7 @@ class OverlayService : Service() {
         if (right == onRight) return
         onRight = right
         placeBar()
-        overlayPrefs.edit().remove("px").apply()      // reopen the card on the new side
+        overlayPrefs.edit().remove("px").remove("cpx").apply()      // reopen the card on the new side
         xAnim?.cancel()
         if (reduced) { zoneParams.x = restX(onRight); updateZone() }
         else xAnim = SpringAnimation(zoneParams, xProp).apply {
@@ -531,8 +531,9 @@ class OverlayService : Service() {
         val o = overlayPrefs
         return listOf(
             pal.signature, Appearance.blurRadiusPx(this), Appearance.opacity(this), Appearance.isGlass(this),
-            screenW, screenH, onRight, o.getBoolean("card_pinned", false),
+            screenW, screenH, onRight, o.getBoolean("card_pinned", false), CardNote.compact(this),
             o.getInt("pw", -1), o.getInt("ph", -1), o.getInt("px", -1), o.getInt("py", -1),
+            o.getInt("cpw", -1), o.getInt("cph", -1), o.getInt("cpx", -1), o.getInt("cpy", -1),
         ).joinToString("/")
     }
 
@@ -542,13 +543,21 @@ class OverlayService : Service() {
         // so a margin for the shadow would show blurred strips around the card.
         val blurPx = Appearance.blurRadiusPx(this)
         val margin = if (blurPx > 0) 0 else dp(10)
-        val minW = dp(220); val minH = dp(180)
         val topLimit = dp(24)
         val saved = getSharedPreferences("overlay", MODE_PRIVATE)
-        val panelW = saved.getInt("pw", (screenW * if (screenW > screenH) 0.5f else 0.72f).toInt())
-            .coerceIn(minW, screenW - margin * 2)
-        val panelH = saved.getInt("ph", (screenH * if (screenW > screenH) 0.8f else 0.46f).toInt())
-            .coerceIn(minH, screenH - topLimit - margin * 2)
+        // Normal or compact: chosen in Settings, and switched on the open card with the button next to the pin.
+        // Each keeps its own size and place ("pw" / "cpw" ...).
+        var compactNow = CardNote.compact(this)
+        fun key(k: String) = if (compactNow) "c$k" else k
+        fun minW() = dp(if (compactNow) 200 else 220)
+        fun minH() = dp(if (compactNow) 150 else 180)
+        val land = screenW > screenH
+        fun styleW() = saved.getInt(key("pw"), (screenW * if (compactNow) (if (land) 0.4f else 0.6f) else (if (land) 0.5f else 0.72f)).toInt())
+            .coerceIn(minW(), screenW - margin * 2)
+        fun styleH() = saved.getInt(key("ph"), (screenH * if (compactNow) (if (land) 0.6f else 0.34f) else (if (land) 0.8f else 0.46f)).toInt())
+            .coerceIn(minH(), screenH - topLimit - margin * 2)
+        val panelW = styleW()
+        val panelH = styleH()
 
         val ed = NoteEditor(ui, pal, startNote, compact = true) {
             NoteStore.save(this, it)
@@ -621,8 +630,23 @@ class OverlayService : Service() {
         }
         var showContinuing: (Note?) -> Unit = {}     // set once the "Continuing" row exists (below)
         var hideChooser: () -> Unit = {}             // set once the screenshot chooser exists (below)
+        var switchStyle: () -> Unit = {}             // set once the card is on screen (below)
         var attachAfterPick: Uri? = null             // screenshot waiting for "Other note" to be chosen
-        val header = LinearLayout(ui).apply {
+        fun startNew() {
+            ed.commit()
+            ed.load(NoteStore.newNote())
+            showContinuing(null)
+            hideChooser(); ed.visibility = View.VISIBLE; recents.visibility = View.GONE
+            ed.bodyEdit.requestFocus()
+        }
+        // Compact has no "Continuing" row: a + in the header starts a fresh note instead.
+        val newBtn = ui.iconButton(R.drawable.ic_add, pal.accent, "New note") { startNew() }.apply { visibility = View.GONE }
+        val styleBtn = ui.iconButton(R.drawable.ic_shrink, pal.secondary, "Compact card") { switchStyle() }
+        val handle = FrameLayout(ui).apply {
+            addView(View(ui).apply { background = roundRect(pal.hairline, dp(2).toFloat()) },
+                FrameLayout.LayoutParams(dp(36), dp(4), Gravity.CENTER))
+        }
+        val header = IconRow(ui, handle).apply {
             gravity = Gravity.CENTER_VERTICAL
             addView(ui.iconButton(R.drawable.ic_list, pal.secondary, "Recent notes") {
                 hideChooser()
@@ -646,13 +670,12 @@ class OverlayService : Service() {
                 hideChooser(); ed.visibility = View.VISIBLE; recents.visibility = View.GONE
                 attachLatestScreenshot(ed)
             }, LinearLayout.LayoutParams(dp(36), dp(40)))
+            addView(newBtn, LinearLayout.LayoutParams(dp(36), dp(40)))
             // Centre: grab handle. Dragging the header moves the card.
-            addView(FrameLayout(ui).apply {
-                addView(View(ui).apply { background = roundRect(pal.hairline, dp(2).toFloat()) },
-                    FrameLayout.LayoutParams(dp(36), dp(4), Gravity.CENTER))
-            }, LinearLayout.LayoutParams(0, -1, 1f))
+            addView(handle, LinearLayout.LayoutParams(0, -1, 1f))
             addView(lockBtn, LinearLayout.LayoutParams(dp(36), dp(40)))
             addView(pinBtn, LinearLayout.LayoutParams(dp(36), dp(40)))
+            addView(styleBtn, LinearLayout.LayoutParams(dp(36), dp(40)))
         }
 
         // When the card reopened on an existing note, say so and offer a fresh one in a tap.
@@ -670,13 +693,7 @@ class OverlayService : Service() {
                 setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f); setTextColor(pal.accent)
                 typeface = android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL)
                 setPadding(dp(10), dp(8), dp(2), dp(8))
-                pressable(0.95f) {
-                    ed.commit()
-                    ed.load(NoteStore.newNote())
-                    this@apply.let { (it.parent as View).visibility = View.GONE }
-                    hideChooser(); ed.visibility = View.VISIBLE; recents.visibility = View.GONE
-                    ed.bodyEdit.requestFocus()
-                }
+                pressable(0.95f) { startNew() }
             })
         }
         // A new screenshot is waiting: ask where it goes before showing any note.
@@ -781,12 +798,16 @@ class OverlayService : Service() {
             chooser.visibility = View.VISIBLE
             chooserOpen = true
         }
+        var continuingNote: Note? = null
+        fun refreshContinue() {
+            val on = continuingNote != null
+            continueRow.visibility = if (on && !compactNow) View.VISIBLE else View.GONE
+            newBtn.visibility = if (on && compactNow) View.VISIBLE else View.GONE
+        }
         showContinuing = { n ->
-            if (n == null) continueRow.visibility = View.GONE
-            else {
-                continueInfo.text = "Continuing · edited ${formatWhen(n.updatedAt)}"
-                continueRow.visibility = View.VISIBLE
-            }
+            continuingNote = n
+            if (n != null) continueInfo.text = "Continuing · edited ${formatWhen(n.updatedAt)}"
+            refreshContinue()
         }
         val r = Appearance.cardRadius(this)
         val closeStrip = LinearLayout(ui).apply {
@@ -796,14 +817,16 @@ class OverlayService : Service() {
                 cornerRadii = floatArrayOf(0f, 0f, 0f, 0f, r, r, r, r)
             }
             contentDescription = "Close note"
-            addView(android.widget.ImageView(ui).apply {
-                setImageResource(R.drawable.ic_close); setColorFilter(pal.secondary)
-            }, LinearLayout.LayoutParams(dp(16), dp(16)).apply { marginEnd = dp(8) })
-            addView(TextView(ui).apply {
-                text = "Close"; setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f); setTextColor(pal.secondary)
-            })
             pressable(0.985f) { collapse() }
         }
+        val closeIcon = android.widget.ImageView(ui).apply {
+            setImageResource(R.drawable.ic_close); setColorFilter(pal.secondary)
+        }
+        val closeLabel = TextView(ui).apply {
+            text = "Close"; setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f); setTextColor(pal.secondary)
+        }
+        closeStrip.addView(closeIcon, LinearLayout.LayoutParams(dp(16), dp(16)).apply { marginEnd = dp(8) })
+        closeStrip.addView(closeLabel)
         val card = LinearLayout(ui).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(0, dp(6), 0, 0)
@@ -826,6 +849,31 @@ class OverlayService : Service() {
             // The card is elevated; without this the grip is drawn (and touched) beneath it.
             elevation = dp(12).toFloat()
         }
+        /** Puts the card's parts in the normal or compact shape. The window's size is set by whoever calls it. */
+        fun applyStyle() {
+            val c = compactNow
+            val side = dp(if (c) 6 else 10)
+            header.iconW = dp(if (c) 30 else 36)
+            header.glyph = dp(if (c) 18 else 22)
+            (header.layoutParams as LinearLayout.LayoutParams).apply { height = dp(if (c) 32 else 40); setMargins(side, 0, side, 0) }
+            (content.layoutParams as LinearLayout.LayoutParams).setMargins(side, 0, side, 0)
+            card.setPadding(0, dp(if (c) 2 else 6), 0, 0)
+            (closeStrip.layoutParams as LinearLayout.LayoutParams).height = dp(if (c) 30 else 46)
+            closeLabel.visibility = if (c) View.GONE else View.VISIBLE
+            (closeIcon.layoutParams as LinearLayout.LayoutParams).marginEnd = if (c) 0 else dp(8)
+            styleBtn.setImageResource(if (c) R.drawable.ic_expand else R.drawable.ic_shrink)
+            styleBtn.contentDescription = if (c) "Normal card" else "Compact card"
+            // The resize grip sits in the Close strip's corner, so it shrinks with the strip. Its margins count from
+            // the card's corner (the panel's padding already moves it in by `margin`); compact centres it in the slim strip.
+            (grip.layoutParams as? FrameLayout.LayoutParams)?.apply {
+                width = dp(if (c) 24 else 32); height = width
+                if (c) setMargins(0, 0, dp(4), dp(3)) else setMargins(0, 0, margin + dp(2), margin + dp(2))
+            }
+            dp(if (c) 5 else 6).let { grip.setPadding(it, it, it, it) }
+            ed.setDense(c)
+            refreshContinue()
+            card.requestLayout()
+        }
         val p = PanelLayout(ui).apply {
             setPadding(margin, margin / 2, margin, margin)
             clipToPadding = false
@@ -835,6 +883,7 @@ class OverlayService : Service() {
             onBack = { if (cardPinned) setPanelFocusable(false) else collapse() }
             onOutside = { if (cardPinned) setPanelFocusable(false) else collapse() }
         }
+        applyStyle()
 
         val lp = WindowManager.LayoutParams(
             panelW + margin * 2, panelH + margin * 2,
@@ -847,8 +896,8 @@ class OverlayService : Service() {
         ).apply {
             gravity = Gravity.TOP or Gravity.LEFT
             val defX = if (onRight) screenW - panelW - margin * 2 + margin else -margin
-            x = saved.getInt("px", defX).coerceIn(-margin, screenW - panelW - margin)
-            y = saved.getInt("py", dp(48)).coerceIn(topLimit - margin, screenH - panelH - margin * 2)
+            x = saved.getInt(key("px"), defX).coerceIn(-margin, screenW - panelW - margin)
+            y = saved.getInt(key("py"), dp(48)).coerceIn(topLimit - margin, screenH - panelH - margin * 2)
             softInputMode = WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE or
                 WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING
             if (blurPx > 0 && Build.VERSION.SDK_INT >= 31) {
@@ -913,8 +962,8 @@ class OverlayService : Service() {
                 .showSoftInput(ed.bodyEdit, InputMethodManager.SHOW_IMPLICIT)
 
             fun savePanel() = saved.edit()
-                .putInt("px", lp.x).putInt("py", lp.y)
-                .putInt("pw", lp.width - margin * 2).putInt("ph", lp.height - margin * 2).apply()
+                .putInt(key("px"), lp.x).putInt(key("py"), lp.y)
+                .putInt(key("pw"), lp.width - margin * 2).putInt(key("ph"), lp.height - margin * 2).apply()
 
             // Move: drag the header 1:1, kept fully on screen.
             var gx = 0f; var gy = 0f; var sx = 0; var sy = 0
@@ -936,13 +985,28 @@ class OverlayService : Service() {
                 when (e.actionMasked) {
                     MotionEvent.ACTION_DOWN -> { gx = e.rawX; gy = e.rawY; sw = lp.width; sh = lp.height }
                     MotionEvent.ACTION_MOVE -> {
-                        lp.width = (sw + e.rawX - gx).toInt().coerceIn(minW + margin * 2, screenW - lp.x + margin)
-                        lp.height = (sh + e.rawY - gy).toInt().coerceIn(minH + margin * 2, screenH - lp.y + margin)
+                        lp.width = (sw + e.rawX - gx).toInt().coerceIn(minW() + margin * 2, screenW - lp.x + margin)
+                        lp.height = (sh + e.rawY - gy).toInt().coerceIn(minH() + margin * 2, screenH - lp.y + margin)
                         runCatching { wm.updateViewLayout(p, lp) }
                     }
                     MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> savePanel()
                 }
                 true
+            }
+
+            // The button next to the pin: the open card turns compact or normal in place, at that style's own size,
+            // keeping the edge on the bar's side where it is. Only for this time; Settings decides how it opens.
+            switchStyle = {
+                compactNow = !compactNow
+                applyStyle()
+                val right = lp.x + lp.width
+                lp.width = styleW() + margin * 2
+                lp.height = styleH() + margin * 2
+                if (onRight) lp.x = right - lp.width
+                lp.x = lp.x.coerceIn(-margin, maxOf(-margin, screenW - lp.width + margin))
+                lp.y = lp.y.coerceIn(topLimit - margin, maxOf(topLimit - margin, screenH - lp.height + margin))
+                runCatching { wm.updateViewLayout(p, lp) }
+                styleBtn.performHapticFeedback(android.view.HapticFeedbackConstants.CONTEXT_CLICK)
             }
 
             if (genieOpen) {
@@ -1245,6 +1309,33 @@ class OverlayService : Service() {
 
 
     /** Window root that reports Back key and outside touches. */
+    /**
+     * The card's top row. Its icons keep [iconW] while they fit; on a narrow card they share the width evenly, so the
+     * last ones (pin, size) are never pushed off the edge. The [handle] takes what is left, and at least a little.
+     */
+    private class IconRow(ctx: Context, private val handle: View) : LinearLayout(ctx) {
+        var iconW = 0
+        /** How big the icon itself is drawn; the rest of each button is padding. */
+        var glyph = 0
+        private val minHandle = (24 * ctx.resources.displayMetrics.density).toInt()
+
+        override fun onMeasure(widthSpec: Int, heightSpec: Int) {
+            val icons = (0 until childCount).map(::getChildAt).filter { it !== handle && it.visibility != View.GONE }
+            if (icons.isNotEmpty() && iconW > 0) {
+                val avail = MeasureSpec.getSize(widthSpec) - paddingLeft - paddingRight
+                val w = minOf(iconW, (avail - minHandle) / icons.size).coerceAtLeast(1)
+                val h = MeasureSpec.getSize(heightSpec)
+                val px = ((w - glyph) / 2).coerceAtLeast(0)
+                val py = ((h - glyph) / 2).coerceAtLeast(0)
+                for (v in icons) {
+                    (v.layoutParams as LayoutParams).apply { width = w; height = LayoutParams.MATCH_PARENT }
+                    if (v.paddingLeft != px || v.paddingTop != py) v.setPadding(px, py, px, py)
+                }
+            }
+            super.onMeasure(widthSpec, heightSpec)
+        }
+    }
+
     private class PanelLayout(ctx: Context) : FrameLayout(ctx) {
         var onBack: (() -> Unit)? = null
         var onOutside: (() -> Unit)? = null

@@ -181,6 +181,7 @@ class NoteEditor(
     }
     val titleEdit: EditText = Edit(ctx)
     val bodyEdit: EditText = Edit(ctx)
+    private val sparkle = ctx.iconButton(R.drawable.ic_sparkle, pal.accent, "Suggest a title") { suggestTitle() }
 
     // The floating card is an overlay window, which cannot show Android's own Copy/Paste bar.
     // So the card gets its own small bubble next to the selection: Copy, Cut, Paste, + Line, All.
@@ -278,8 +279,7 @@ class NoteEditor(
         addView(LinearLayout(ctx).apply {
             gravity = Gravity.CENTER_VERTICAL
             addView(titleEdit, LayoutParams(0, -2, 1f))
-            addView(ctx.iconButton(R.drawable.ic_sparkle, pal.accent, "Suggest a title") { suggestTitle() },
-                LayoutParams(dp(38), dp(38)))
+            addView(sparkle, LayoutParams(dp(38), dp(38)))
         }, LayoutParams(-1, -2))
         addView(View(ctx).apply { setBackgroundColor(pal.hairline) },
             LayoutParams(-1, 1).apply { marginStart = dp(4); marginEnd = dp(4) })
@@ -563,6 +563,20 @@ class NoteEditor(
     }
 
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
+
+    /** The compact card: smaller text and less space around it. Only for the card; switches back and forth in place. */
+    fun setDense(dense: Boolean) {
+        if (!compactMode) return
+        titleEdit.setTextSize(TypedValue.COMPLEX_UNIT_SP, if (dense) 16f else 18f)
+        titleEdit.setPadding(dp(4), dp(if (dense) 4 else 8), dp(4), dp(if (dense) 2 else 4))
+        bodyEdit.setTextSize(TypedValue.COMPLEX_UNIT_SP, if (dense) 14f else 15f)
+        bodyEdit.setLineSpacing(0f, if (dense) 1.1f else 1.15f)
+        bodyEdit.setPadding(dp(4), dp(if (dense) 4 else 8), dp(4), dp(if (dense) 4 else 8))
+        bodyEdit.minHeight = dp(if (dense) 72 else 120)
+        val s = dp(if (dense) 32 else 38)
+        sparkle.layoutParams = sparkle.layoutParams.apply { width = s; height = s }
+        sparkle.setPadding(dp(if (dense) 7 else 9), dp(if (dense) 7 else 9), dp(if (dense) 7 else 9), dp(if (dense) 7 else 9))
+    }
 
     /** The checklist button in the note screen and the card: makes the selected lines tasks, or plain again. */
     fun toggleChecklist() {
