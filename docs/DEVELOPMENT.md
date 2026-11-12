@@ -84,7 +84,17 @@ Sync is off until you connect it. You need two things, both free.
    keytool -list -v -keystore ~/.config/.android/debug.keystore -alias androiddebugkey -storepass android | grep SHA1
    ```
 4. In the app: **Settings → Sync → Connect Google Drive**, enter your vault password, and approve access.
-5. While the consent screen is in "Testing", Google expires the permission after about 7 days. **Publish the app** from the consent screen to stop that. The only scope used is `drive.appdata`, which is non-sensitive.
+5. While the consent screen is in "Testing", Google expires the permission after about 7 days. **Publish the app** to stop that (done for this project: it is *In production*). Publishing only changes the sign-in screen's status; it does not put the app in any store. Google first wants these on the branding page, which the relay Worker serves (deploy it first, see below):
+
+   | Field | Value |
+   | --- | --- |
+   | Application home page | `https://<your worker>.workers.dev/` |
+   | Privacy policy link | `https://<your worker>.workers.dev/privacy` |
+   | Terms of service link | `https://<your worker>.workers.dev/terms` |
+   | Authorized domains | `<your account>.workers.dev` (`workers.dev` is a public suffix, so Google accepts it as yours) |
+   | App logo | **leave empty**: a logo means brand verification and a review of several days |
+
+   Then **Audience → Publish app**. The only scope used is `drive.appdata`, which is non-sensitive, so no verification is needed. Sign in again once on every device afterwards: sign-ins made while testing keep their 7-day expiry.
 
 Use the **same vault password on every device**.
 
@@ -98,7 +108,9 @@ npx wrangler login
 npx wrangler deploy
 ```
 
-Then set `BASE` in `app/src/main/java/com/scratchy/app/Live.kt` to your Worker URL and rebuild. Without a reachable relay, sync still works through Drive (a few seconds slower).
+Then set `BASE` in `app/src/main/java/com/scratchy/app/Live.kt` and `RELAY` in `desktop/apps/desktop/src/lib/sync.ts` to your Worker URL and rebuild. Without a reachable relay, sync still works through Drive (a few seconds slower).
+
+The Worker also serves the home page, privacy policy and terms that Google's consent screen links to (`worker/src/pages.js`, at `/`, `/privacy` and `/terms`). Change the contact address in that file to your own before deploying.
 
 ## Code map
 
@@ -125,7 +137,7 @@ Then set `BASE` in `app/src/main/java/com/scratchy/app/Live.kt` to your Worker U
 | `Categories.kt`, `Dialogs.kt` | Categories (names, AI sorting, pickers) and the app's own dialog card |
 | `Ai.kt`, `Attachments.kt`, `Screenshots.kt`, `Checklist.kt`, `HoldToDelete.kt`, `Appearance.kt`, `CardNote.kt`, `Ui.kt` | Supporting pieces |
 
-`worker/` holds the Cloudflare Worker and its Durable Object (`src/index.js`).
+`worker/` holds the Cloudflare Worker and its Durable Object (`src/index.js`), and the public pages for Google's consent screen (`src/pages.js`).
 
 ## Permissions
 
@@ -164,7 +176,7 @@ The color system (follows the wallpaper, with a fixed-color fallback) and the ne
 - [ ] **Empty states, undo bar and toasts:** wording and spacing.
 
 **Other open items**
-- [ ] Publish the Google OAuth app (Cloud Console, OAuth consent screen, Publish app) so the Drive permission stops expiring every 7 days.
+- [x] Publish the Google OAuth app so the Drive permission stops expiring every 7 days. In production since 12 Nov 2026, without a logo.
 - [ ] Try the vault password change on two real devices.
 - [ ] Look at the secret-notes images: they are hidden in the app but not encrypted on disk.
 
