@@ -352,7 +352,7 @@ class SettingsActivity : Activity() {
             addView(opacityRow)
         }
         lookCard.row {
-            blurRow = SliderRow(context, pal, "Blur whole screen behind", 0, 100, Appearance.blur(context), { "$it%" }) {
+            blurRow = SliderRow(context, pal, "Blur", 0, 100, Appearance.blur(context), { "$it%" }) {
                 Appearance.setBlur(context, it)
             }
             addView(blurRow)
@@ -360,7 +360,17 @@ class SettingsActivity : Activity() {
                 blurRow.enabledLook(false)
                 caption(pal, "Blur isn't available on this phone right now (battery saver or developer options can switch it off).")
             } else {
-                caption(pal, "Android can only blur the entire screen behind the card, not just under it. Leave it at 0% while you watch a video.")
+                val help = listOf(
+                    "Blurs the entire screen behind the card. Leave it at 0% while you watch a video.",
+                    "Blurs only what is right under the card, so the rest of the screen stays sharp.",
+                )
+                lateinit var note: TextView
+                addView(SegmentedControl(context, pal, listOf("Whole screen", "Under the card"),
+                    if (Appearance.blurUnderCard(context)) 1 else 0) { i ->
+                    Appearance.setBlurUnderCard(context, i == 1)
+                    note.text = help[i]
+                }, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(10) })
+                note = caption(pal, help[if (Appearance.blurUnderCard(context)) 1 else 0])
             }
         }
         page.addView(lookCard)

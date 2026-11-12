@@ -25,9 +25,13 @@ object Appearance {
     fun opacity(ctx: Context) = prefs(ctx).getInt("opacity", if (isGlass(ctx)) 60 else 100).coerceIn(30, 100)
     fun setOpacity(ctx: Context, v: Int) = prefs(ctx).edit().putInt("opacity", v).apply()
 
-    /** 0..100. Off by default: Android blurs the whole screen behind the card, not just under it. */
+    /** 0..100. Off by default: it blurs the whole screen behind the card unless [blurUnderCard] is on. */
     fun blur(ctx: Context) = prefs(ctx).getInt("blur", 0).coerceIn(0, 100)
     fun setBlur(ctx: Context, v: Int) = prefs(ctx).edit().putInt("blur", v).apply()
+
+    /** Blur only the area under the card, instead of the whole screen behind it. */
+    fun blurUnderCard(ctx: Context) = prefs(ctx).getString("blur_area", "screen") == "card"
+    fun setBlurUnderCard(ctx: Context, on: Boolean) = prefs(ctx).edit().putString("blur_area", if (on) "card" else "screen").apply()
 
     fun blurSupported(ctx: Context) =
         Build.VERSION.SDK_INT >= 31 && ctx.getSystemService(WindowManager::class.java).isCrossWindowBlurEnabled

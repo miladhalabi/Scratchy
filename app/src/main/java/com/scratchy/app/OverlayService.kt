@@ -1,5 +1,6 @@
 package com.scratchy.app
 
+import android.app.Dialog
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -66,6 +67,7 @@ class OverlayService : Service() {
     private var panelOpen = false
     private var cardPinned = false                 // pinned: stays on screen, outside taps pass through
     private var panelLp: WindowManager.LayoutParams? = null
+    private var panelWin: CardWindow? = null
     private var panelFocusable = true
     private var onRight = false
     private val main = Handler(Looper.getMainLooper())
@@ -152,7 +154,7 @@ class OverlayService : Service() {
         main.removeCallbacks(clearPending)
         main.removeCallbacks(prepareCard)
         editor?.commit()
-        panel?.let { runCatching { wm.removeView(it) } }
+        panelWin?.remove()
         runCatching { wm.removeView(zone) }
         running = false
         super.onDestroy()
@@ -230,7 +232,7 @@ class OverlayService : Service() {
             lp.height = lp.height.coerceAtMost(screenH - dp(24))
             lp.x = lp.x.coerceIn(-m, (screenW - lp.width + m).coerceAtLeast(-m))
             lp.y = lp.y.coerceIn(0, (screenH - lp.height + m).coerceAtLeast(0))
-            runCatching { wm.updateViewLayout(p, lp) }
+            panelWin?.update()
         }
     }
 
@@ -530,7 +532,7 @@ class OverlayService : Service() {
     private fun cardKey(): String {
         val o = overlayPrefs
         return listOf(
-            pal.signature, Appearance.blurRadiusPx(this), Appearance.opacity(this), Appearance.isGlass(this),
+            pal.signature, Appearance.blurRadiusPx(this), Appearance.blurUnderCard(this), Appearance.opacity(this), Appearance.isGlass(this),
             screenW, screenH, onRight, o.getBoolean("card_pinned", false), CardNote.compact(this),
             o.getInt("pw", -1), o.getInt("ph", -1), o.getInt("px", -1), o.getInt("py", -1),
             o.getInt("cpw", -1), o.getInt("cph", -1), o.getInt("cpx", -1), o.getInt("cpy", -1),
@@ -542,6 +544,7 @@ class OverlayService : Service() {
         // With blur on, the window is exactly the card: the system blurs the whole window rectangle,
         // so a margin for the shadow would show blurred strips around the card.
         val blurPx = Appearance.blurRadiusPx(this)
+        val underCard = blurPx > 0 && Appearance.blurUnderCard(this)
         val margin = if (blurPx > 0) 0 else dp(10)
         val topLimit = dp(24)
         val saved = getSharedPreferences("overlay", MODE_PRIVATE)
@@ -900,11 +903,12 @@ class OverlayService : Service() {
             y = saved.getInt(key("py"), dp(48)).coerceIn(topLimit - margin, screenH - panelH - margin * 2)
             softInputMode = WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE or
                 WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING
-            if (blurPx > 0 && Build.VERSION.SDK_INT >= 31) {
+            if (blurPx > 0 && Build.VERSION.SDK_INT >= 31 && !underCard) {
                 flags = flags or WindowManager.LayoutParams.FLAG_BLUR_BEHIND
                 blurBehindRadius = blurPx
             }
         }
+        val win = CardWindow(p, lp, underCard, Appearance.cardRadius(this), blurPx)
         // Measure it now, while nothing is on screen, so attaching the window has little left to do.
         p.measure(View.MeasureSpec.makeMeasureSpec(lp.width, View.MeasureSpec.EXACTLY),
             View.MeasureSpec.makeMeasureSpec(lp.height, View.MeasureSpec.EXACTLY))
@@ -944,13 +948,14 @@ class OverlayService : Service() {
             val genieOpen = style == "genie" && !reduced
             if (genieOpen) {
                 p.alpha = 0f                       // the real card stays invisible until the genie lands
-                if (blurPx > 0 && Build.VERSION.SDK_INT >= 31) lp.blurBehindRadius = 0   // blur fades in with the genie
+                if (blurPx > 0) win.setBlur(0)          // blur fades in with the genie
                 // The keyboard waits for the genie to land (below), so its slide-in doesn't cost the genie frames.
                 lp.softInputMode = WindowManager.LayoutParams.SOFT_INPUT_STATE_UNCHANGED or
                     WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING
             }
-            wm.addView(p, lp)
+            win.show()
             panel = p
+            panelWin = win
             // The bar stays visible while the card is open, and tapping it closes the card. Windows stack in
             // the order they were added, so put the bar back on top of the card and the catcher.
             // During the genie that waits until it lands: re-adding a window mid-animation costs frames.
@@ -973,7 +978,7 @@ class OverlayService : Service() {
                     MotionEvent.ACTION_MOVE -> {
                         lp.x = (sx + e.rawX - gx).toInt().coerceIn(-margin, screenW - lp.width + margin)
                         lp.y = (sy + e.rawY - gy).toInt().coerceIn(topLimit - margin, screenH - lp.height + margin)
-                        runCatching { wm.updateViewLayout(p, lp) }
+                        win.update()
                     }
                     MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> savePanel()
                 }
@@ -987,7 +992,7 @@ class OverlayService : Service() {
                     MotionEvent.ACTION_MOVE -> {
                         lp.width = (sw + e.rawX - gx).toInt().coerceIn(minW() + margin * 2, screenW - lp.x + margin)
                         lp.height = (sh + e.rawY - gy).toInt().coerceIn(minH() + margin * 2, screenH - lp.y + margin)
-                        runCatching { wm.updateViewLayout(p, lp) }
+                        win.update()
                     }
                     MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> savePanel()
                 }
@@ -1005,7 +1010,7 @@ class OverlayService : Service() {
                 if (onRight) lp.x = right - lp.width
                 lp.x = lp.x.coerceIn(-margin, maxOf(-margin, screenW - lp.width + margin))
                 lp.y = lp.y.coerceIn(topLimit - margin, maxOf(topLimit - margin, screenH - lp.height + margin))
-                runCatching { wm.updateViewLayout(p, lp) }
+                win.update()
                 styleBtn.performHapticFeedback(android.view.HapticFeedbackConstants.CONTEXT_CLICK)
             }
 
@@ -1014,7 +1019,7 @@ class OverlayService : Service() {
                 afterFirstLayout(p) {
                     val bmp = capture(p)
                     val loc = IntArray(2); p.getLocationOnScreen(loc)
-                    if (blurPx > 0) animateBlur(p, lp, 0, blurPx, genieMs(420))
+                    if (blurPx > 0) animateBlur(win, 0, blurPx, genieMs(420))
                     runGenie(bmp, loc[0], loc[1], opening = true, live = p,
                         cardAlpha = Appearance.opacity(this) / 100f) {
                         if (panel === p) {                // not if it was closed while growing
@@ -1063,7 +1068,7 @@ class OverlayService : Service() {
         panelFocusable = focusable
         lp.flags = if (focusable) lp.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE.inv()
         else lp.flags or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
-        runCatching { wm.updateViewLayout(p, lp) }
+        panelWin?.update()
         if (!focusable) {
             (getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager).hideSoftInputFromWindow(p.windowToken, 0)
         }
@@ -1099,7 +1104,9 @@ class OverlayService : Service() {
     /** Reverse the entrance along the same path: slide back to the edge. */
     private fun collapse() {
         val p = panel ?: return
+        val win = panelWin ?: return
         panel = null
+        panelWin = null
         panelOpen = false
         panelLp = null
         showShotPrompt = null
@@ -1119,14 +1126,11 @@ class OverlayService : Service() {
             // Make the whole window transparent and untouchable first, then remove it a beat
             // later. Removing it while its last drawn frame is still on screen flashes the
             // old panel for a few frames.
-            runCatching {
-                val wlp = p.layoutParams as WindowManager.LayoutParams
-                wlp.alpha = 0f
-                wlp.flags = wlp.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
-                wm.updateViewLayout(p, wlp)
-            }
+            win.lp.alpha = 0f
+            win.lp.flags = win.lp.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+            win.update()
             p.visibility = View.INVISIBLE
-            main.postDelayed({ runCatching { wm.removeView(p) } }, 120)
+            main.postDelayed({ win.remove() }, 120)
         }
         fun done() {
             applySideFromPrefs()
@@ -1144,11 +1148,10 @@ class OverlayService : Service() {
                     cardAlpha = Appearance.opacity(this) / 100f) {
                     done()
                 }
-                val wlp = p.layoutParams as WindowManager.LayoutParams
-                val blurNow = if (Build.VERSION.SDK_INT >= 31) wlp.blurBehindRadius else 0
+                val blurNow = if (Build.VERSION.SDK_INT >= 31) win.blur else 0
                 if (blurNow > 0) {
                     // The card fades via the crossfade; keep the window so its blur can fade out with the genie.
-                    animateBlur(p, wlp, blurNow, 0, genieMs(480)) { removePanel() }
+                    animateBlur(win, blurNow, 0, genieMs(480)) { removePanel() }
                 } else {
                     main.postDelayed({ removePanel() }, 140)   // just after the quick crossfade has handed over
                 }
@@ -1199,14 +1202,11 @@ class OverlayService : Service() {
         (base * 100f / overlayPrefs.getInt("genie_speed", 100).coerceIn(50, 200)).toLong()
 
     /** Eases the window's blur radius so it never pops on or off. */
-    private fun animateBlur(view: View, lp: WindowManager.LayoutParams, from: Int, to: Int, ms: Long, onEnd: (() -> Unit)? = null) {
+    private fun animateBlur(win: CardWindow, from: Int, to: Int, ms: Long, onEnd: (() -> Unit)? = null) {
         if (Build.VERSION.SDK_INT < 31) { onEnd?.invoke(); return }
         ValueAnimator.ofInt(from, to).apply {
             duration = ms
-            addUpdateListener {
-                lp.blurBehindRadius = it.animatedValue as Int
-                runCatching { wm.updateViewLayout(view, lp) }
-            }
+            addUpdateListener { win.setBlur(it.animatedValue as Int) }
             addListener(object : AnimatorListenerAdapter() {
                 override fun onAnimationEnd(animation: Animator) { onEnd?.invoke() }
             })
@@ -1309,6 +1309,59 @@ class OverlayService : Service() {
 
 
     /** Window root that reports Back key and outside touches. */
+    /**
+     * The card's window. Normally the panel is added to the screen as it is, and its blur (FLAG_BLUR_BEHIND) covers
+     * the whole screen behind it. Android blurs just the area under a window only through
+     * Window.setBackgroundBlurRadius, and a view added on its own has no Window, so for "Under the card" the panel
+     * goes into a Dialog's window instead (still an overlay, with the same layout params).
+     */
+    private inner class CardWindow(
+        val p: PanelLayout, val lp: WindowManager.LayoutParams, underCard: Boolean, corner: Float, startBlur: Int,
+    ) {
+        /** The blur radius now, in pixels. */
+        var blur = startBlur
+            private set
+
+        private val dialog: Dialog? = if (!underCard || Build.VERSION.SDK_INT < 31) null
+        else object : Dialog(ui, android.R.style.Theme_Translucent_NoTitleBar) {
+            // The panel sits inside the dialog's own views, so the tap outside the card arrives here, not there.
+            override fun onTouchEvent(event: MotionEvent): Boolean {
+                if (event.action == MotionEvent.ACTION_OUTSIDE) { p.onOutside?.invoke(); return true }
+                return super.onTouchEvent(event)
+            }
+        }.apply {
+            setCancelable(false)
+            window?.apply {
+                // Clear, but rounded like the card: the blur takes its corners from the window's background.
+                setBackgroundDrawable(GradientDrawable().apply { setColor(0); cornerRadius = corner })
+                setDecorFitsSystemWindows(false)
+            }
+            setContentView(p)
+        }
+
+        fun show() {
+            if (dialog == null) { wm.addView(p, lp); return }
+            dialog.window?.attributes = lp
+            dialog.show()
+            setBlur(blur)
+        }
+
+        fun update() {
+            runCatching { if (dialog == null) wm.updateViewLayout(p, lp) else dialog.window?.attributes = lp }
+        }
+
+        fun remove() {
+            runCatching { if (dialog == null) wm.removeView(p) else dialog.dismiss() }
+        }
+
+        fun setBlur(r: Int) {
+            blur = r
+            if (Build.VERSION.SDK_INT < 31) return
+            if (dialog == null) { lp.blurBehindRadius = r; if (p.isAttachedToWindow) update() }
+            else dialog.window?.setBackgroundBlurRadius(r)
+        }
+    }
+
     /**
      * The card's top row. Its icons keep [iconW] while they fit; on a narrow card they share the width evenly, so the
      * last ones (pin, size) are never pushed off the edge. The [handle] takes what is left, and at least a little.
