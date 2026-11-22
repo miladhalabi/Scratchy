@@ -2,6 +2,11 @@
 
 What changed in each release of Scratchy, newest first. Versions follow [Semantic Versioning](https://semver.org).
 
+## 1.0.1 — 2026-11-22
+
+### Fixed
+- **Sync on Linux.** The 1.0.0 Arch package couldn't sign in to Google: every sync failed with "invalid_client: The provided client secret is invalid." The app's Google credentials had picked up a stray newline when the package was built. They are now trimmed, both in the app and in the release build. Install 1.0.1 and sync picks up again with your existing sign-in.
+
 ## 1.0.0 — 2026-11-12
 
 The first public release, for Android and for Linux (Arch, tested on Hyprland).
