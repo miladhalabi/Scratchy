@@ -60,6 +60,9 @@ jobs:
           GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
           GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
         run: |
+          # A pasted secret often ends in a newline, which Google rejects as "invalid_client".
+          GOOGLE_CLIENT_ID=$(printf %s "$GOOGLE_CLIENT_ID" | tr -d '[:space:]')
+          GOOGLE_CLIENT_SECRET=$(printf %s "$GOOGLE_CLIENT_SECRET" | tr -d '[:space:]')
           if [ -z "$GOOGLE_CLIENT_ID" ] || [ -z "$GOOGLE_CLIENT_SECRET" ]; then
             echo "::error::The GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET secrets are missing"; exit 1
           fi

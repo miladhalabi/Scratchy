@@ -108,9 +108,12 @@ struct GoogleClient { client_id: String, client_secret: String }
 
 /// The Google "Desktop app" credentials, from the environment (set by run.sh from desktop/.env.local)
 /// or baked in at build time. A desktop client secret is not confidential, but it stays out of git.
+/// Whitespace is trimmed: a stray newline from a pasted secret makes Google answer "invalid_client".
 #[tauri::command]
 async fn google_client() -> Result<GoogleClient, String> {
-    let get = |name: &str, built: Option<&str>| std::env::var(name).ok().or(built.map(String::from)).filter(|v| !v.is_empty());
+    let get = |name: &str, built: Option<&str>| {
+        std::env::var(name).ok().or(built.map(String::from)).map(|v| v.trim().to_string()).filter(|v| !v.is_empty())
+    };
     match (
         get("GOOGLE_CLIENT_ID", option_env!("GOOGLE_CLIENT_ID")),
         get("GOOGLE_CLIENT_SECRET", option_env!("GOOGLE_CLIENT_SECRET")),
